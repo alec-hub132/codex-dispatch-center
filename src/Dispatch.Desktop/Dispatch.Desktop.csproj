@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup>
+  <PropertyGroup><ApplicationIcon>Assets/app.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup><Resource Include="Assets/app.ico" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Dispatch.Core/Dispatch.Core.csproj" />
+    <ProjectReference Include="../Dispatch.Daemon/Dispatch.Daemon.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../Dispatch.McpBridge/Dispatch.McpBridge.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyComponents" AfterTargets="Build">
+    <ItemGroup>
+      <ServiceFiles Include="../Dispatch.Daemon/bin/$(Configuration)/net8.0/**/*" />
+      <BridgeFiles Include="../Dispatch.McpBridge/bin/$(Configuration)/net8.0/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ServiceFiles)" DestinationFiles="@(ServiceFiles->'$(OutDir)service/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(BridgeFiles)" DestinationFiles="@(BridgeFiles->'$(OutDir)mcp/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="../../scripts/connection.py" DestinationFolder="$(OutDir)scripts" />
+    <Copy SourceFiles="../../scripts/Inspect-CodexModelAccess.py" DestinationFolder="$(OutDir)scripts" />
+  </Target>
+</Project>

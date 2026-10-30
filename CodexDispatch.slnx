@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dispatch.Core/Dispatch.Core.csproj" />
+    <Project Path="src/Dispatch.Daemon/Dispatch.Daemon.csproj" />
+    <Project Path="src/Dispatch.McpBridge/Dispatch.McpBridge.csproj" />
+    <Project Path="src/Dispatch.Desktop/Dispatch.Desktop.csproj" />
+    <Project Path="src/Runner.Mock/Runner.Mock.csproj" /><Project Path="src/Runner.SolidWorks/Runner.SolidWorks.csproj" />
+  </Folder>
+  <Folder Name="/tests/"><Project Path="tests/Dispatch.Tests/Dispatch.Tests.csproj" /></Folder>
+</Solution>

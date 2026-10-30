@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <None Include="../../scripts/Start-CodexContinuation.mjs;../../scripts/continuation-policy.mjs" Link="continuation/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../scripts/Send-QueueWake.mjs;../../scripts/queue-wake-policy.mjs;../../scripts/codex-queue-ipc.mjs" Link="continuation/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../Dispatch.Core/Dispatch.Core.csproj" />
+    <ProjectReference Include="../Runner.Mock/Runner.Mock.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../Runner.SolidWorks/Runner.SolidWorks.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="../Runner.Workspace/Runner.Workspace.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+  <Target Name="CopyMockRunner" AfterTargets="Build">
+    <ItemGroup><RunnerFiles Include="../Runner.Mock/bin/$(Configuration)/$(TargetFramework)/*" /></ItemGroup>
+    <Copy SourceFiles="@(RunnerFiles)" DestinationFolder="$(OutDir)runner" />
+    <ItemGroup><SwFiles Include="../Runner.SolidWorks/bin/$(Configuration)/net8.0-windows/*" /></ItemGroup>
+    <Copy SourceFiles="@(SwFiles)" DestinationFolder="$(OutDir)solidworks" />
+    <ItemGroup><WorkspaceFiles Include="../Runner.Workspace/bin/$(Configuration)/net8.0-windows/**/*" /></ItemGroup>
+    <Copy SourceFiles="@(WorkspaceFiles)" DestinationFiles="@(WorkspaceFiles->'$(OutDir)workspace/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+</Project>

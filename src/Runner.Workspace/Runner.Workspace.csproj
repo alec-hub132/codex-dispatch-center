@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><PlatformTarget>x64</PlatformTarget>
+    <SolidWorksInteropPath Condition="'$(SolidWorksInteropPath)' == ''">$(SOLIDWORKS_INTEROP_PATH)</SolidWorksInteropPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Dispatch.Core/Dispatch.Core.csproj" />
+    <Reference Include="SolidWorks.Interop.sldworks"><HintPath>$(SolidWorksInteropPath)</HintPath><EmbedInteropTypes>true</EmbedInteropTypes></Reference>
+  </ItemGroup>
+  <Target Name="RequireSolidWorksSdk" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(SolidWorksInteropPath)')" Text="未找到SolidWorks SDK互操作程序集，请使用scripts/Build-Test.ps1自动定位，或指定SolidWorksInteropPath。" />
+  </Target>
+</Project>
