@@ -16,5 +16,6 @@
     <Copy SourceFiles="@(BridgeFiles)" DestinationFiles="@(BridgeFiles->'$(OutDir)mcp/%(RecursiveDir)%(Filename)%(Extension)')" />
     <Copy SourceFiles="../../scripts/connection.py" DestinationFolder="$(OutDir)scripts" />
     <Copy SourceFiles="../../scripts/Inspect-CodexModelAccess.py" DestinationFolder="$(OutDir)scripts" />
+    <Copy SourceFiles="../../scripts/Run-ResourceStep.py" DestinationFolder="$(OutDir)scripts" />
   </Target>
 </Project>

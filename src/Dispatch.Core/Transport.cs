@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.CompilerServices;
 
 namespace Dispatch.Core;
 
@@ -12,6 +13,16 @@ public sealed record ServiceReply(string RequestId, bool Ok, JsonElement? Result
 public static class Transport
 {
     public const int MaxChars = 128 * 1024;
+    public const int MaxReplyChars = 4 * 1024 * 1024;
+    private sealed class LineBuffer
+    {
+        public char[] Chars { get; } = new char[4096];
+        public int Offset { get; set; }
+        public int Count { get; set; }
+        public bool DiscardUntilNewline { get; set; }
+    }
+    // MCP同一输入流可连续收到多条消息，预读尾部须随reader保留，不能吞掉下一条。
+    private static readonly ConditionalWeakTable<TextReader, LineBuffer> LineBuffers = new();
     public static string PipeName(string instance)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(instance, "^[a-zA-Z0-9-]{1,64}$")) throw new ArgumentException("无效的服务实例名。");
@@ -19,17 +30,36 @@ public static class Transport
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity ?? throw new InvalidOperationException("无法获取用户身份"))))[..20];
         return $"CodexDispatch-{hash}-{instance}";
     }
-    public static async Task<string?> ReadLineAsync(TextReader reader, CancellationToken token)
+    public static async Task<string?> ReadLineAsync(TextReader reader, CancellationToken token,int maxChars=MaxChars)
     {
         var result = new StringBuilder();
-        var buffer = new char[1];
+        var buffer = LineBuffers.GetValue(reader, _ => new LineBuffer());
         while (true)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(), token);
-            if (read == 0) return result.Length == 0 ? null : result.ToString();
-            if (buffer[0] == '\n') return result.ToString().TrimEnd('\r');
-            if (result.Length >= MaxChars) throw new DispatchException("MESSAGE_TOO_LARGE", "消息超过允许大小。");
-            result.Append(buffer[0]);
+            token.ThrowIfCancellationRequested();
+            if (buffer.Offset == buffer.Count)
+            {
+                buffer.Count = await reader.ReadAsync(buffer.Chars.AsMemory(), token);
+                buffer.Offset = 0;
+                if (buffer.Count == 0) return result.Length == 0 ? null : result.ToString();
+            }
+            var newline = Array.IndexOf(buffer.Chars, '\n', buffer.Offset, buffer.Count - buffer.Offset);
+            if (buffer.DiscardUntilNewline)
+            {
+                buffer.Offset = newline < 0 ? buffer.Count : newline + 1;
+                buffer.DiscardUntilNewline = newline < 0;
+                continue;
+            }
+            var length = (newline < 0 ? buffer.Count : newline) - buffer.Offset;
+            var start = buffer.Offset;
+            buffer.Offset += length + (newline < 0 ? 0 : 1);
+            if ((long)result.Length + length > maxChars)
+            {
+                buffer.DiscardUntilNewline = newline < 0;
+                throw new DispatchException("MESSAGE_TOO_LARGE", "消息超过允许大小。");
+            }
+            result.Append(buffer.Chars, start, length);
+            if (newline >= 0) return result.ToString().TrimEnd('\r');
         }
     }
     public static async Task<ServiceReply> Call(string instance, string method, JsonElement arguments, CancellationToken token = default)
@@ -44,7 +74,7 @@ public static class Transport
             using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(JsonSerializer.Serialize(request, Json.Options).AsMemory(), deadline.Token);
-            var line = await ReadLineAsync(reader, deadline.Token) ?? throw new IOException("服务连接已关闭。");
+            var line = await ReadLineAsync(reader, deadline.Token,MaxReplyChars) ?? throw new IOException("服务连接已关闭。");
             var reply = JsonSerializer.Deserialize<ServiceReply>(line, Json.Options) ?? throw new IOException("无效服务响应。");
             if (reply.RequestId != request.RequestId) throw new IOException("服务响应编号不匹配。");
             return reply;

@@ -5,7 +5,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class QueueBindingTests
 {
-    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "queue-binding-tests"),Guid.NewGuid().ToString("N"));
+    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "queue-binding-tests"),Guid.NewGuid().ToString("N"));
     private ResourceRequest Request()=>new("request-a","alias-only","app:test-editor","验证绑定不操作软件",60,false,"thread-a","turn-a","读取原测试报告并清理");
     private void Runtime(Scheduler s,string turn="turn-a")
     {

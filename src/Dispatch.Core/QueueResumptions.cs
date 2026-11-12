@@ -85,7 +85,7 @@ public sealed partial class Scheduler
                 current=current with{ReadyUntil=clock.GetUtcNow().AddSeconds(15)};
                 binding=binding with{SourceTurnId=current.LatestTurnId,ConsentVersion=c.Version,RegisteredAt=clock.GetUtcNow()};
             }
-            SavePermit(job with{State=JobState.Queued,Sequence=++sequence,Summary="原任务已重新排队接单，未新建或重做测试。"},permit,binding,current);
+            SavePermit(job with{State=JobState.Queued,UserPriority=false,Sequence=++sequence,Summary="原任务已重新排队接单，未新建或重做测试。"},permit,binding,current);
             return PermitView(permit);
         }
     }

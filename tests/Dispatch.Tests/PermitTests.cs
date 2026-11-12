@@ -5,7 +5,7 @@ namespace Dispatch.Tests;
 
 public sealed class PermitTests
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "permit-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "permit-tests"), Guid.NewGuid().ToString("N"));
     private static ResourceRequest Request(string id) => new(id, "窗口A", "solidworks", "验证本窗口功能", 30);
 
     [Fact] public void Mcp_solidworks_and_other_apps_run_together_but_same_software_waits()

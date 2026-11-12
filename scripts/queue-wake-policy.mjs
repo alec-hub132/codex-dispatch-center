@@ -1,5 +1,11 @@
 // 一次发送；投递回执不代表接单或测试成功。
+export function deliveryRoute(plan){
+ if(plan.kind===undefined||plan.kind==='queue-wake')return {method:'begin_queue_wake_send',journalPrefix:'queue-wake-'};
+ if(plan.kind==='idle-cleanup')return {method:'begin_idle_cleanup_send',journalPrefix:'idle-cleanup-'};
+ throw Error('不支持的发送类型');
+}
 export async function sendQueueWakeOnce(plan,io){
+ deliveryRoute(plan);
  for(const key of ['leaseId','wakeId','threadId','sourceTurnId'])if(!/^[a-zA-Z0-9-]{1,128}$/.test(plan[key]??'')||/[\r\n]/.test(plan[key]))throw Error('关联编号无效');
  if(typeof plan.prompt!=='string'||!plan.prompt.trim()||plan.prompt.length>16000)throw Error('接续任务无效');
  if(!await io.claim())return 'ALREADY_CLAIMED';

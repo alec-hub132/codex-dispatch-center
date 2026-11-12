@@ -33,7 +33,7 @@ while (true)
             var negotiatedProtocol = requestedProtocol is "2024-11-05" or "2025-03-26" or "2025-06-18" ? requestedProtocol : "2025-06-18";
             initialized = true;
             response = Result(new { protocolVersion = negotiatedProtocol, capabilities = new { tools = new { } },
-                serverInfo = new { name = module == "queue" ? "codex-queue" : module == "models" ? "codex-model-dispatch" : "codex-dispatch", version = "0.11.3" },
+                serverInfo = new { name = module == "queue" ? "codex-queue" : module == "models" ? "codex-model-dispatch" : "codex-dispatch", version = "0.21.0" },
                 instructions = module == "queue" ? "这是测试排队工具。先get_module_settings核对排队是否启用，关闭不代表可绕过共享资源占用。已有许可必须清理释放。本工具不控制模型。" : module == "models" ? "这是模型调度工具。模型选择由已配置主管判断，工具不按阶段硬编码模型。先读取模块设置及排除名单；已有周期完成或执行中需要主管接管时均沿同周期返回主管。发送回执不代表生效。本工具不申请测试资源。" : "测试排队与模型调度独立启停；先get_module_settings核对当前模块设置。资源使用须有许可，已有占用必须清理。模型由主管规划并核验交接，执行结束或中途需要接管时沿原周期返回；不得把发送回执当作生效。" });
         }
         else if (method == "ping") response = Result(new { });

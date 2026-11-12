@@ -13,7 +13,9 @@ public sealed class DesktopBackend(string instance, string data, string targetHo
 
     public async Task<JsonElement> Call(string method, object? args = null)
     {
-        var reply = await Transport.Call(Instance, method, JsonSerializer.SerializeToElement(args ?? new { }, Json.Options));
+        ServiceReply reply;
+        try { reply = await Transport.Call(Instance, method, JsonSerializer.SerializeToElement(args ?? new { }, Json.Options)); }
+        catch(DispatchException ex) { Log.Write("DESKTOP_API_FAILED","读取服务接口失败："+method+"；错误码："+ex.Code,error:ex);throw; }
         if (!reply.Ok) throw new DispatchException(reply.Code ?? "ERROR", reply.Message ?? "请求失败");
         return reply.Result!.Value;
     }

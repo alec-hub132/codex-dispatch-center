@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using Dispatch.Core;
 using Dispatch.Daemon;
 
@@ -14,17 +15,23 @@ if (!created) { Console.Error.WriteLine("该用户的调度服务实例已经运
 var log = new Diagnostics(Path.Combine(data, "logs"));
 try
 {
+    var startup = Stopwatch.StartNew();
     using var scheduler = new Scheduler(new JobStore(data));
     scheduler.UpgradeQueuedResourcePermits();
     using var stop = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
     var workspace = new WorkspaceOperations(scheduler);
     var continuation = new ModelContinuationRunner(scheduler,instance);
-    var api = new ServiceApi(scheduler, () => stop.CancelAfter(250), workspace.Execute, continuation.Arm);
+    var hostRecovery=new HostRecoveryRunner(scheduler);
+    var api = new ServiceApi(scheduler, () => stop.CancelAfter(250), workspace.Execute, continuation.Arm,hostRecovery.Recheck,hostRecovery.Control,()=>hostRecovery.MonitorStatus);
+    var hostRecoveryLoop=Task.Run(async()=>{try{await hostRecovery.Run(stop.Token);}catch{stop.Cancel();throw;}});
     var runner = new ProcessTestRunner(scheduler);
     var queueResumption=new QueueResumptionRunner(scheduler,instance);
     var resumptionLoop=Task.Run(async()=>{try{await queueResumption.Run(stop.Token);}catch{stop.Cancel();throw;}});
+    var cleanupRunner=new IdleCleanupRunner(scheduler,instance);
+    var cleanupLoop=Task.Run(async()=>{try{await cleanupRunner.Run(stop.Token);}catch{stop.Cancel();throw;}});
     var connections = new System.Collections.Concurrent.ConcurrentDictionary<long, Task>();
+    var slowMethods = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset>();
     using var connectionSlots = new SemaphoreSlim(24);
     long connectionId = 0;
     var queueLoop = Task.Run(async () =>
@@ -45,6 +52,7 @@ try
         finally { await Task.WhenAll(running); }
     });
     Console.WriteLine("调度服务已启动（模拟测试与 SolidWorks 只读检查）");
+    log.Write("SERVICE_READY", $"调度服务已就绪，初始化耗时{startup.ElapsedMilliseconds}ms。");
     try
     {
         while (!stop.IsCancellationRequested)
@@ -61,7 +69,7 @@ try
         }
     }
     catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-    finally { stop.Cancel(); await Task.WhenAll(connections.Values); await Task.WhenAll(queueLoop,resumptionLoop); }
+    finally { stop.Cancel(); await Task.WhenAll(connections.Values); await Task.WhenAll(queueLoop,resumptionLoop,cleanupLoop,hostRecoveryLoop); }
     return 0;
 
     async Task HandleSlot(NamedPipeServerStream pipe)
@@ -89,8 +97,15 @@ try
                     var request = JsonSerializer.Deserialize<ServiceRequest>(line, Json.Options) ?? throw new JsonException();
                     requestId = request.RequestId;
                     if (request.Version != 1) throw new DispatchException("VERSION_MISMATCH", "调度协议版本不匹配。");
+                    var elapsed = Stopwatch.StartNew();
                     var value = await api.Execute(request.Method, request.Arguments, timeout.Token);
                     reply = new(requestId, true, JsonSerializer.SerializeToElement(value, Json.Options));
+                    if (elapsed.ElapsedMilliseconds >= 500 && request.Method is "get_health" or "get_resource" or "accept_resource" or "release_resource" or "list_queue_changes" or "get_queue_owners" or "list_tests_page")
+                    {
+                        var now = DateTimeOffset.UtcNow;
+                        if (slowMethods.TryAdd(request.Method, now) || slowMethods.TryGetValue(request.Method, out var last) && now - last >= TimeSpan.FromMinutes(1) && slowMethods.TryUpdate(request.Method, now, last))
+                            log.Write("SCHEDULER_REQUEST_SLOW", $"接口{request.Method}耗时{elapsed.ElapsedMilliseconds}ms。仅记录耗时，不记录请求参数。");
+                    }
                 }
                 catch (DispatchException ex) { reply = new(requestId, false, Code: ex.Code, Message: ex.Message); }
                 catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or ArgumentException)

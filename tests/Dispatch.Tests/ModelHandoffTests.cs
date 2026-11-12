@@ -3,7 +3,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class ModelHandoffTests
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "handoff-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "handoff-tests"), Guid.NewGuid().ToString("N"));
     private static ModelRequest Request(string id="a", string session="bound-thread") => new(id,session,"worker","medium","测试限定任务","只读取测试报告","supervisor","high","取得报告，或遇到失败立即返回主管");
     private Scheduler Open(bool configure=true)
     {

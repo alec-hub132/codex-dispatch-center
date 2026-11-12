@@ -5,7 +5,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class QueueObservationTests
 {
-    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "queue-observation-tests"),Guid.NewGuid().ToString("N"));
+    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "queue-observation-tests"),Guid.NewGuid().ToString("N"));
     private string Source=>Path.Combine(root,"codex","sessions","rollout-thread-a.jsonl");
     private readonly Clock clock=new();
     private void Append(object value)=>File.AppendAllText(Source,JsonSerializer.Serialize(value)+"\n");
@@ -19,6 +19,31 @@ public sealed class QueueObservationTests
         s.SetModules(s.GetModules() with{ModelsEnabled=false});
         return s.RequestResource(new("a","alias","app:test-editor","隔离接续验证",60,true,"thread-a","turn-a","只检查模拟报告，随后清理"));
     }
+    [Fact] public void Human_priority_uses_original_authorized_wake_once()
+    {
+        using var scheduler = new Scheduler(new JobStore(root), clock);
+        var earlier = scheduler.RequestResource(new("earlier", "B", "app:test-editor", "先提交", RequireAcceptance: true));
+        var original = Prepare(scheduler);
+        Event("task_complete", "turn-a");
+        scheduler.RequestManualDispatch(new(original.Job.Id, 0, JobState.Queued));
+        scheduler.Claim();
+        Assert.Equal("Offered", scheduler.GetResource(original.Job.Id, original.Token).Status);
+        Assert.Equal("Queued", scheduler.GetResource(earlier.Job.Id, earlier.Token).Status);
+        Assert.Equal(original.Job.Id, scheduler.ClaimQueueWake()!.LeaseId);
+        Assert.Null(scheduler.ClaimQueueWake());
+    }
+
+    [Fact] public void Human_priority_does_not_override_new_user_work()
+    {
+        using var scheduler = new Scheduler(new JobStore(root), clock);
+        var original = Prepare(scheduler);
+        Event("task_complete", "turn-a");
+        Append(new { type="response_item", payload=new { type="message", role="user", content=new[]{new {type="input_text",text="另一个新任务"}} } });
+        Assert.Throws<DispatchException>(() => scheduler.RequestManualDispatch(new(original.Job.Id, 0, JobState.Queued)));
+        Assert.False(scheduler.Get(original.Job.Id).UserPriority);
+        Assert.Null(scheduler.ClaimQueueWake());
+    }
+
     [Fact] public void Active_source_does_not_reserve_software_and_finished_source_becomes_offer_without_models()
     {
         using var s=new Scheduler(new JobStore(root),clock);var p=Prepare(s);

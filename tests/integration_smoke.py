@@ -88,7 +88,9 @@ class IntegrationTests(unittest.TestCase):
         model_tools = {t['name'] for t in model_client.rpc('tools/list')['result']['tools']}
         self.assertEqual({'get_health', 'get_module_settings'}, queue_tools & model_tools)
         self.assertIn('request_resource', queue_tools)
-        self.assertFalse({'begin_queue_wake_send','set_queue_resume_consent','get_queue_resumption_settings'} & (queue_tools | model_tools))
+        self.assertFalse({'begin_queue_wake_send','set_queue_resume_consent','get_queue_resumption_settings','get_idle_cleanup_settings','set_idle_cleanup_settings','begin_idle_cleanup_send','set_idle_cleanup_owner','manual_release_resource','get_queue_owners','manual_dispatch_test','list_queue_changes'} & (queue_tools | model_tools))
+        self.assertIn('error',queue_client.rpc('tools/call',{'name':'manual_release_resource','arguments':{}}))
+        self.assertFalse({'set_host_recovery_settings','get_host_recovery_settings','recheck_host_recovery'} & (queue_tools | model_tools))
         self.assertTrue({'accept_resource','retry_resource','get_queue_binding'} <= queue_tools)
         self.assertFalse({'accept_resource','retry_resource','get_queue_binding'} & model_tools)
         self.assertTrue({'capture_workspace', 'yield_resource', 'resume_resource', 'restore_workspace', 'get_resource_events'} <= queue_tools)
@@ -109,9 +111,77 @@ class IntegrationTests(unittest.TestCase):
         job = self.submit(queue_client, 'queue-only')
         self.assertEqual('Passed', self.finish(queue_client, job['id'])['state'])
 
+    def test_oversized_input_keeps_next_mcp_request_and_responses_do_not_merge(self):
+        c = self.client()
+        c.seq += 1
+        expected_id = c.seq
+        valid = json.dumps({'jsonrpc': '2.0', 'id': expected_id, 'method': 'ping'})
+        c.proc.stdin.write('x' * (128 * 1024 + 20000) + '\n' + valid + '\n')
+        c.proc.stdin.flush()
+        rejected = json.loads(c.lines.get(timeout=25))
+        self.assertEqual(-32602, rejected['error']['code'])
+        accepted = json.loads(c.lines.get(timeout=25))
+        self.assertEqual(expected_id, accepted['id'])
+        self.assertEqual({}, accepted['result'])
+        self.assertTrue(c.tool('get_health')['daemonRunning'])
+
+    def test_host_recovery_toggle_is_private_persistent_and_isolated_from_real_host(self):
+        c = self.client()
+        original = c.tool('get_module_settings')
+        settings = self.private_call('get_host_recovery_settings', {})['settings']
+        self.assertFalse(settings['enabled'])
+        self.private_call('set_host_recovery_settings', dict(settings, enabled=True))
+        self.assertTrue(c.tool('get_health')['solidWorksCrashRecoveryEnabled'])
+        self.daemon.kill()
+        self.daemon.wait()
+        self.start_daemon()
+        self.assertTrue(self.private_call('get_host_recovery_settings', {})['settings']['enabled'])
+        self.assertIsNone(self.private_call('get_host_recovery_settings', {})['incident'])
+        self.assertEqual(original, c.tool('get_module_settings'))
+        saved = self.private_call('get_host_recovery_settings', {})['settings']
+        self.private_call('set_host_recovery_settings', dict(saved, enabled=False))
+        self.assertFalse(c.tool('get_health')['solidWorksCrashRecoveryEnabled'])
+
+    def test_resource_step_releases_before_offline_fixes_and_retest_joins_tail(self):
+        c=self.client();settings=c.tool('get_module_settings');self.private_call('set_module_settings',dict(settings,modelsEnabled=False))
+        def request(label):return c.tool('request_resource',dict(requestId=label,sessionId=label,resource='app:step-fixture',purpose='纯虚拟操作段验证，不操作软件',durationSeconds=90))
+        def offered(p):
+            key=dict(leaseId=p['job']['id'],token=p['token'])
+            for _ in range(60):
+                current=c.tool('get_resource',key)
+                if current['status']=='Offered':return current
+                time.sleep(.05)
+            self.fail('未取得预留')
+        def accept(p):
+            current=offered(p)
+            return c.tool('accept_resource',dict(leaseId=p['job']['id'],token=p['token'],offerId=current['offerId'],generation=current['job']['generation']))
+        a=request('a-first');a=accept(a);b=request('b-waiting');third=request('c-waiting')
+        permit=self.data/'private-step-permit.json';permit.write_text(json.dumps(dict(leaseId=a['job']['id'],token=a['token'],generation=a['job']['generation'])),encoding='utf-8')
+        worker=self.data/'test-step.py';worker.write_text("import os,json,pathlib,sys\ntry:\n raise RuntimeError('模拟测试发现问题')\nfinally:\n pathlib.Path(os.environ['CODEX_RESOURCE_STEP_CLEANUP']).write_text(json.dumps(dict(stepId=os.environ['CODEX_RESOURCE_STEP_ID'],leaseId=os.environ['CODEX_RESOURCE_STEP_LEASE'],generation=int(os.environ['CODEX_RESOURCE_STEP_GENERATION']),operationsStopped=True,ownedResourcesCleaned=True)))\n",encoding='utf-8')
+        output=self.data/'steps'
+        executed=subprocess.run([sys.executable,str(ROOT/'scripts/Run-ResourceStep.py'),'--permit',str(permit),'--output',str(output),'--timeout','3','--instance',self.instance,'--bridge',str(BRIDGE),'--',sys.executable,str(worker)],capture_output=True,text=True,encoding='utf-8',timeout=30)
+        self.assertEqual(1,executed.returncode)
+        result=json.loads(executed.stdout);self.assertEqual('Released',result['resourceStatus']);self.assertEqual('OK',result['cleanupStatus']);self.assertFalse(result['testPassed']);self.assertTrue(result['cleanupConfirmed'])
+        fixing=subprocess.Popen([sys.executable,'-c','import time;time.sleep(20)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        try:
+            b=accept(b);self.assertIsNone(fixing.poll(),'A离线修复尚未结束时，B应已获准')
+            retry=request('a-retest');self.assertEqual('Queued',retry['status'])
+            c.tool('release_resource',dict(leaseId=b['job']['id'],token=b['token'],generation=b['job']['generation'],cleanupConfirmed=True))
+            third=accept(third);self.assertEqual('Queued',c.tool('get_resource',dict(leaseId=retry['job']['id'],token=retry['token']))['status'])
+            c.tool('release_resource',dict(leaseId=third['job']['id'],token=third['token'],generation=third['job']['generation'],cleanupConfirmed=True))
+            retry=accept(retry);c.tool('release_resource',dict(leaseId=retry['job']['id'],token=retry['token'],generation=retry['job']['generation'],cleanupConfirmed=True))
+            audit=dict(simulationOnly=True,hostAccessed=False,aTestFailedButReleased=True,bGrantedWhileAOfflineWorkerRunning=fixing.poll() is None,retestRespectedFifo=True,phaseResult=result)
+            (self.data/'resource-step-audit.json').write_text(json.dumps(audit,ensure_ascii=False,indent=2),encoding='utf-8')
+        finally:
+            if fixing.poll() is None:fixing.terminate()
+            fixing.wait(timeout=5)
+        for file in output.rglob('*'):
+            if file.is_file():self.assertNotIn(a['token'],file.read_text(encoding='utf-8'))
+
     def start_daemon(self):
+        daemon_env = dict(os.environ, DISPATCH_TEST_NO_HOST_RECOVERY='1')
         self.daemon = subprocess.Popen(['dotnet', str(DAEMON), '--instance', self.instance, '--data', str(self.data)],
-                                       stdout=self.log, stderr=self.log)
+                                       stdout=self.log, stderr=self.log, env=daemon_env)
         deadline = time.monotonic() + 12
         c = self.client()
         while time.monotonic() < deadline:
@@ -162,13 +232,22 @@ class IntegrationTests(unittest.TestCase):
             '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], text=True).strip()
         name = hashlib.sha256(sid.encode()).hexdigest().upper()[:20]
         request_id = uuid.uuid4().hex
-        with open(r'\\.\pipe\CodexDispatch-' + name + '-' + self.instance, 'r+b', buffering=0) as pipe:
+        for attempt in range(50):
+            try:
+                connection = open(r'\\.\pipe\CodexDispatch-' + name + '-' + self.instance, 'r+b', buffering=0)
+                break
+            except OSError as error:
+                if error.errno not in (2,22) or attempt==49: raise
+                time.sleep(.02)  # 仅在写入前等管道可连接，不重发任何已发送请求。
+        with connection as pipe:
             pipe.write((json.dumps({'version': 1, 'requestId': request_id, 'method': method, 'arguments': arguments}) + '\n').encode())
             line = bytearray()
-            while len(line) <= 128 * 1024:
+            # 与服务独立的4Mi字符响应上限配套；UTF-8字节最多按四倍预留。
+            while len(line) <= 16 * 1024 * 1024:
                 ch = pipe.read(1)
                 if not ch or ch == b'\n': break
                 line.extend(ch)
+            self.assertLessEqual(len(line),16 * 1024 * 1024,'私有接口响应超出上限')
         reply = json.loads(line)
         self.assertEqual(request_id, reply['requestId'])
         self.assertTrue(reply['ok'], reply)
@@ -263,6 +342,41 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual([], self.private_call('get_queue_resumption_settings', {})['wakes'])
         c.tool('release_resource', dict(key, generation=0, cleanupConfirmed=False))
         self.assertNotIn(p['token'], (self.data / 'logs' / 'bug.jsonl').read_text(encoding='utf-8'))
+
+    def test_idle_cleanup_observer_and_settings_use_private_api_and_never_interrupt_active_chat(self):
+        thread = '22222222-2222-4222-8222-222222222222'
+        home = self.data / 'idle-runtime'
+        folder = home / 'sessions'
+        folder.mkdir(parents=True)
+        source = folder / ('rollout-' + thread + '.jsonl')
+        records = [{'type': 'session_meta', 'payload': {'id': thread}},
+                   {'type': 'turn_context', 'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'payload': {'turn_id': 'idle-active-turn', 'model': 'fixture', 'effort': 'medium'}}]
+        source.write_text(''.join(json.dumps(r)+'\n' for r in records), encoding='utf-8')
+        self.private_call('set_runtime_source', {'home': str(home)})
+        c = self.client()
+        settings = c.tool('get_module_settings')
+        self.private_call('set_module_settings', dict(settings, modelsEnabled=False))
+        saved = self.private_call('set_idle_cleanup_settings', {'enabled': True, 'idleMinutes': 1, 'version': 0})
+        p = c.tool('request_resource', {'requestId': 'idle-observer', 'sessionId': 'alias-not-identity', 'ownerThreadId': thread,
+            'resource': 'app:idle-fixture', 'purpose': '只验证活动观察，不发送真实消息或启动软件'})
+        key = {'leaseId': p['job']['id'], 'token': p['token']}
+        end = time.monotonic()+5
+        while time.monotonic() < end:
+            p = c.tool('get_resource', key)
+            if p['status'] == 'Offered': break
+            time.sleep(.03)
+        self.assertEqual('Granted', c.tool('accept_resource', dict(key, offerId=p['offerId'], generation=p['job']['generation']))['status'])
+        end = time.monotonic()+5
+        while time.monotonic() < end:
+            view = self.private_call('get_idle_cleanup_settings', {})
+            if view['statuses'][0]['status'] == 'WINDOW_ACTIVE': break
+            time.sleep(.05)
+        self.assertEqual('WINDOW_ACTIVE', view['statuses'][0]['status'])
+        self.assertEqual([], view['tickets'])
+        self.private_call('set_idle_cleanup_settings', dict(saved, enabled=False))
+        c.tool('release_resource', dict(key, generation=p['job']['generation'], cleanupConfirmed=True))
+        self.assertNotIn(key['token'], (self.data/'logs/bug.jsonl').read_text(encoding='utf-8'))
 
     def test_bound_queue_offer_acceptance_is_independent_of_models(self):
         thread = 'queue-fixture-thread'

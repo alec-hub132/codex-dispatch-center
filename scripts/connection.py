@@ -49,6 +49,12 @@ RULE = RULE.replace(END,
         '- 接单默认：MCP新申请默认requireAcceptance=true，即使没有启用自动唤醒也需accept_resource；Offered不是Granted。不要为了省一步接单设置false。聊天结束前，尚未接单的原任务保留等待；已Granted必须完成清理回执，不能把回复结束当作释放。\n'
         '- 宿主复用：SolidWorks测试默认只连接已运行实例，禁止连接失败后循环新建实例或自动重启。新开独立实例须有人类明确授权；资源许可本身不授权启动、关闭软件。测试脚本必须在finally停止自有操作并清理自建资源，仅读写本段必要内容；本段宿主测试完成后立即release_resource并回读Released/cleanupStatus=OK，再继续编译或汇报，不等整项开发完成。不得关闭用户原有实例/文档，也不得把新实例遗留给下一窗口。\n' + END)
 
+RULE = RULE.replace(END,
+        '- 无活动清理：新request_resource提供ownerThreadId真实聊天编号，不能仅靠sessionId别名识别。只有用户独立启用清理功能后，后台才按无活动门限自动唤回原窗口一次；清理轮仅读取原许可、停止自建测试并清理自建资源、确认释放和回读，不重跑原测试，不关闭用户SW或聊天，不切模型。消息送达不等于清理成功。\n' + END)
+
+RULE = RULE.replace(END,
+        '- 操作段释放：许可只覆盖一段宿主测试及其清理，不覆盖随后代码修复、普通编译、分析或汇报。可执行脚本测试优先使用包内scripts/Run-ResourceStep.py，传原许可私有计划和纯测试命令；测试程序在finally实际停止自建操作并清理后，按执行器提供的本次stepId/lease/generation返回清理回执，执行器立即release并回读。测试失败但已清理也应释放，修复可与下一窗口测试并行；复测用新的requestId排队，不复用Released许可或抢在已有等待者前。直接MCP测试同样须在开始改代码前显式清理释放。进程退出、开始编译或模型思考不构成清理证明，缺少有效回执保持隔离；不自动还原现场、不关闭用户宿主。\n' + END)
+
 
 class ConnectionError(RuntimeError):
     pass
@@ -173,7 +179,7 @@ class Installer:
     def rule(self):
         if self.module == 'all':
             return RULE
-        queue_prefixes = ('- 临时 SolidWorks', '- 完成测试', '- 固定套件', '- 使用许可', '- 报告 simulationOnly', '- 顺序占用', '- 原聊天接续', '- 接续接单', '- 接单默认', '- 宿主复用')
+        queue_prefixes = ('- 临时 SolidWorks', '- 完成测试', '- 固定套件', '- 使用许可', '- 报告 simulationOnly', '- 顺序占用', '- 原聊天接续', '- 接续接单', '- 接单默认', '- 宿主复用', '- 无活动清理', '- 操作段释放')
         lines = [line for line in RULE.splitlines()[2:-1]
                  if line.startswith('- sessionId') or
                  (line.startswith(queue_prefixes) if self.module == 'queue' else not line.startswith(queue_prefixes))]
@@ -502,7 +508,7 @@ def main():
     parser.add_argument('--module', choices=['all', 'queue', 'models'], default='all')
     parser.add_argument('--cli')
     parser.add_argument('--bridge', type=pathlib.Path, default=pathlib.Path(__file__).resolve().parents[1] / 'src/Dispatch.McpBridge/bin/Release/net8.0/Dispatch.McpBridge.dll')
-    parser.add_argument('--backups', type=pathlib.Path, default=(pathlib.Path(os.environ.get('LOCALAPPDATA', pathlib.Path.home() / '.local' / 'share')) / 'CodexDispatch' / 'connections'))
+    parser.add_argument('--backups', type=pathlib.Path, default=pathlib.Path(os.environ.get('LOCALAPPDATA', pathlib.Path.home())) / 'CodexDispatch' / 'connections')
     args = parser.parse_args()
     cli = discover_cli(args.cli)
     home = resolve_home(args.home, os.environ.get('CODEX_HOME'), args.user_home)

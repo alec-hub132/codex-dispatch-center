@@ -5,7 +5,7 @@ namespace Dispatch.Tests;
 
 public sealed class ContinuationTests
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "continuation-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "continuation-tests"), Guid.NewGuid().ToString("N"));
     public static WorkspaceScene Scene(int stamp = 10) => new(123, new(2026, 10, 29, 0, 0, 0, TimeSpan.Zero), "29.5.1",
         [new("D:/temporary/A.SLDPRT", "A.SLDPRT", 1, stamp, false, "默认", null,
             [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0], [0,0,0], 1, [])], "D:/temporary/A.SLDPRT");

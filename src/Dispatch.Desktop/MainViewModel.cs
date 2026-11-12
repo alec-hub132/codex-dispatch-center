@@ -7,15 +7,15 @@ using Dispatch.Core;
 
 namespace Dispatch.Desktop;
 
-public sealed class MainViewModel : Observable, IDisposable
+public sealed partial class MainViewModel : Observable, IDisposable
 {
     private readonly DesktopBackend backend;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private bool refreshing;
     private bool busy;
-    private int pageIndex;
+    private int pageIndex = 1;
     public int PageIndex { get => pageIndex; set { pageIndex = value; Changed(); Changed(nameof(PageTitle)); if (value == 3) ReadLogs(); } }
-    public string PageTitle => PageIndex switch { 1 => "测试队列", 2 => "Codex 连接", 3 => "诊断与日志", 4 => "高级：产物留档", 5 => "工具管理", _ => "调度总览" };
+    public string PageTitle => PageIndex switch { 1 => "队列操作台", 2 => "Codex 连接", 3 => "诊断与日志", 4 => "高级：产物留档", 5 => "工具管理", _ => "调度总览" };
     private ModuleSettings modules = new();
     public bool QueueEnabled => modules.QueueEnabled;
     public bool ModelsEnabled => modules.ModelsEnabled;
@@ -33,6 +33,19 @@ public sealed class MainViewModel : Observable, IDisposable
     public string QueueResumeSummary => queueConsents.FirstOrDefault(c=>c.ThreadId==QueueResumeThread) is {} c ? $"已保存：{(c.Enabled?"允许原排队任务接续":"自动接续已关闭")}（授权版本{c.Version}）" : "该聊天尚未配置排队接续授权。";
     public AsyncCommand SaveQueueResumeCommand {get;}
     public AsyncCommand FillQueueThreadCommand {get;}
+    private IdleCleanupSettings idleSaved=new();
+    private int idleDraftVersion;
+    private bool idleLoaded,idleCleanupEnabled;
+    private int idleMinutes=10;
+    public bool IdleCleanupEnabled {get=>idleCleanupEnabled;set{idleCleanupEnabled=value;Changed();}}
+    public int IdleMinutes {get=>idleMinutes;set{idleMinutes=value;Changed();}}
+    public string IdleCleanupSummary=>$"已保存：{(idleSaved.Enabled?"允许原窗口单次清理":"自动清理已关闭")} · 连续{idleSaved.IdleMinutes}分钟无活动后检测。";
+    public string IdleCleanupProgress {get;private set;}="暂无待清理的窗口许可。";
+    public string IdleOwnerLeaseId {get;set;}="";
+    public string IdleOwnerThreadId {get;set;}="";
+    public AsyncCommand SaveIdleCleanupCommand {get;}
+    public AsyncCommand ReloadIdleCleanupCommand {get;}
+    public AsyncCommand BindIdleCleanupOwnerCommand {get;}
     public AsyncCommand ToggleQueueCommand { get; }
     public AsyncCommand ToggleModelsCommand { get; }
     public AsyncCommand ConnectQueueCommand { get; }
@@ -40,9 +53,15 @@ public sealed class MainViewModel : Observable, IDisposable
     public AsyncCommand DisconnectQueueCommand { get; }
     public AsyncCommand DisconnectModelsCommand { get; }
     public AsyncCommand ConnectBothCommand { get; }
-    public bool IsBusy { get => busy; private set { busy = value; Changed(); Changed(nameof(CanOperate)); } }
+    public bool IsBusy { get => busy; private set { busy = value; Changed(); Changed(nameof(CanOperate)); Changed(nameof(CanManualRelease)); Changed(nameof(CanCancelSelected)); Changed(nameof(CanManualDispatch)); } }
     public bool CanOperate => !IsBusy;
-    public ObservableCollection<JobRow> Jobs { get; } = [];
+    public ResetCollection<JobRow> Jobs { get; } = [];
+    public ResetCollection<QueueWindowGroup> QueueGroups {get;}=[];
+    private readonly Dictionary<string,QueueWindowGroup> windowGroups=new(StringComparer.Ordinal);
+    public string QueueWindowSummary => $"{QueueGroups.Count} 个窗口组 · 同一窗口的多次提交归在一起；分组不改变实际排队顺序。";
+    public bool IsRefreshing=>refreshing;
+    public Func<JobRow,Task<bool>>? ConfirmManualRelease {get;set;}
+    public AsyncCommand ManualReleaseCommand {get;}
     public ObservableCollection<DecisionRow> Decisions { get; } = [];
     public ObservableCollection<CandidateRow> Candidates { get; } = [];
     public CandidateRow? SelectedCandidate { get; set; }
@@ -54,7 +73,9 @@ public sealed class MainViewModel : Observable, IDisposable
     public string CandidateResult { get; private set; } = "选择产物目录并填写相对文件路径。冻结操作只生成副本，不部署或执行。";
     public Suite[] Suites { get; } = SuiteCatalog.All();
     public Suite? SelectedSuite { get; set; }
-    public JobRow? SelectedJob { get; set; }
+    private JobRow? selectedJob;
+    public JobRow? SelectedJob { get=>selectedJob;set{if(selectedJob!=value){if(selectedJob is {} old)old.IsSelected=false;selectedJob=value;if(value is {} row && row.WindowGroup?.IsExpanded==true)row.IsSelected=true;}Changed();Changed(nameof(CanManualRelease)); NotifyQueueSelection();} }
+    public bool CanManualRelease => CanOperate && QueueDataFresh && SelectedJob?.CanManualRelease==true;
     public bool ServiceOnline { get; private set; }
     public bool Paused { get; private set; }
     public string PauseLabel => Paused ? "恢复队列" : "暂停队列";
@@ -122,6 +143,30 @@ public sealed class MainViewModel : Observable, IDisposable
     public MainViewModel(DesktopBackend backend, bool autoRefresh = true)
     {
         this.backend = backend;
+        InitializeManualDispatch();
+        InitializeHostRecovery();
+        ManualReleaseCommand=Command(async()=>
+        {
+            if (!QueueDataFresh) throw new InvalidOperationException("请先刷新并确认服务状态。");
+            var row=SelectedJob??throw new InvalidOperationException("请先选择组内的一次提交。");
+            if(!row.CanManualRelease)throw new InvalidOperationException("这次提交无需手动解除。固定套件执行中请使用安全取消。");
+            if(ConfirmManualRelease is null || !await ConfirmManualRelease(row)){SetNotice("已取消手动解除，原记录保持。");return;}
+            var waiting=row.Raw.State is JobState.Queued or JobState.Offered or JobState.WaitingForClient;
+            var result=(await backend.Call("manual_release_resource",new QueueManualRelease(row.Id,row.Raw.Generation,row.Raw.State,!waiting,!waiting,
+                waiting?"用户在窗口分组队列撤回所选提交":"用户在确认框确认本段操作停止且自建资源已清理"))).Deserialize<Job>(Json.Options)!;
+            var readback=(await backend.Call("get_test_status",new{jobId=row.Id})).Deserialize<Job>(Json.Options)!;
+            if(readback.State!=result.State || (!waiting && readback.CleanupStatus!="OK"))throw new InvalidOperationException("解除回读不一致，请查看故障日志。");
+            await Refresh();SetNotice(waiting?"所选这一次提交已撤回；同组其他提交保留。":"所选许可已释放，已回读清理确认；下一窗口可按队列使用。");
+        });
+        SaveIdleCleanupCommand=Command(async()=>{
+            idleSaved=(await backend.Call("set_idle_cleanup_settings",new IdleCleanupSettings(IdleCleanupEnabled,IdleMinutes,idleDraftVersion))).Deserialize<IdleCleanupSettings>(Json.Options)!;
+            idleDraftVersion=idleSaved.Version;Changed(nameof(IdleCleanupSummary));SetNotice("清理设置已保存。只唤回核实过的原窗口一次，停止并清理自建测试，确认释放后才放行；保留聊天与用户宿主。");
+        });
+        ReloadIdleCleanupCommand=Command(async()=>{idleLoaded=false;await Refresh();});
+        BindIdleCleanupOwnerCommand=Command(async()=>{
+            await backend.Call("set_idle_cleanup_owner",new{leaseId=IdleOwnerLeaseId.Trim(),threadId=IdleOwnerThreadId.Trim()});
+            SetNotice("原窗口关联已保存，本次不释放许可，也不立即发送清理通知。");await Refresh();
+        });
         SaveQueueResumeCommand=Command(async()=>{
             var c=(await backend.Call("set_queue_resume_consent",new QueueResumeConsent(QueueResumeThread,QueueResumeEnabled,queueConsentVersion))).Deserialize<QueueResumeConsent>(Json.Options)!;
             queueConsents=queueConsents.Where(x=>x.ThreadId!=c.ThreadId).Append(c).ToArray();queueConsentVersion=c.Version;
@@ -173,14 +218,14 @@ public sealed class MainViewModel : Observable, IDisposable
             SetNotice(SelectedSuite.SimulationOnly ? "已提交模拟测试，等待调度。" : "已提交 SolidWorks 只读检查，等待调度。"); await Refresh();
         });
         PauseCommand = Command(async () => { await backend.Call("set_queue_paused", new { paused = !Paused }); await Refresh(); });
-        CancelCommand = Command(async () => { if (SelectedJob is null) throw new InvalidOperationException("请先选择任务。"); await backend.Call("cancel_test", new { jobId = SelectedJob.Id }); await Refresh(); });
+        CancelCommand = Command(async () => { if (!QueueDataFresh) throw new InvalidOperationException("请先刷新并核对当前状态。"); if (SelectedJob is null) throw new InvalidOperationException("请先选择任务。"); await backend.Call("cancel_test", new { jobId = SelectedJob.Id }); await Refresh(); });
         ReportCommand = Command(async () =>
         {
             if (SelectedJob is null) throw new InvalidOperationException("请先选择任务。");
             var result = await backend.Call("get_test_report", new { jobId = SelectedJob.Id });
             var job = result.GetProperty("job").Deserialize<Job>(Json.Options)!;
             var scope = job.Suite.Runner == "external-agent" ? "此记录仅表示资源许可状态，不代表测试结果。测试证据由原开发窗口提供。" : job.Suite.SimulationOnly ? "本报告来自模拟测试，未操作真实 SolidWorks。" : "本报告仅验证宿主只读接入，不代表插件功能通过。";
-            Report = $"{JobRow.Display(job.State)} · {job.Suite.Name}\n\n{job.Summary}\n\n来源：{job.Request.SessionId}\n清理：{(job.CleanupStatus == "OK" ? "已确认" : job.CleanupStatus == "NOT_REQUIRED" ? "无需清理" : "待确认")}\n\n{scope}\n任务编号：{job.Id}";
+            Report = $"{JobRow.Display(job.State)} · {job.Suite.Name}\n\n{job.Summary}\n\n窗口：{SelectedJob.Session}\n{SelectedJob.WindowGroup?.Identity}\n提交：{job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n开始：{job.StartedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")??"尚未开始"}\n结束：{job.EndedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")??"尚未结束"}\n清理：{(job.CleanupStatus == "OK" ? "已确认" : job.CleanupStatus == "NOT_REQUIRED" ? "无需清理" : "待确认")}\n\n{scope}\n任务编号：{job.Id}";
             Changed(nameof(Report));
         });
         InspectCommand = Command(() => Connection("Inspect"));
@@ -189,7 +234,7 @@ public sealed class MainViewModel : Observable, IDisposable
         RecoverCommand = Command(() => Connection("Recover"));
         StartCommand = Command(async () => { await backend.StartService(); await Refresh(); SetNotice("调度服务已就绪。"); });
         StopCommand = Command(async () => { await backend.Call("shutdown_service"); await Task.Delay(400); await Refresh(); SetNotice("已请求安全停止服务，模拟任务会先结束进程并清理。"); });
-        RefreshCommand = Command(Refresh);
+        RefreshCommand = Command(() => Refresh(true));
         LogCommand = Command(() => { ReadLogs(); return Task.CompletedTask; });
         OpenFolderCommand = Command(() => { Directory.CreateDirectory(backend.DataRoot); Process.Start(new ProcessStartInfo("explorer.exe", backend.DataRoot) { UseShellExecute = true }); return Task.CompletedTask; });
         BrowseCandidateCommand = Command(() => { var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择待测产物目录" }; if (dialog.ShowDialog() == true) CandidateSource = dialog.FolderName; return Task.CompletedTask; });
@@ -260,18 +305,26 @@ public sealed class MainViewModel : Observable, IDisposable
         catch (Exception ex) { backend.Log.Write("UI_OPERATION_FAILED", "界面操作失败", error: ex); SetNotice(ex.Message); }
         finally { IsBusy = false; }
     });
-    public async Task Refresh()
+    public async Task Refresh(bool forceNames = false)
     {
         if (refreshing) return;
         refreshing = true;
         try
         {
             var health = await backend.Call("get_health");
+            await RefreshHostRecovery();
             if (health.TryGetProperty("modules", out var moduleState)) modules = moduleState.Deserialize<ModuleSettings>(Json.Options)!;
+            Changed(nameof(HostRecoverySummary));
             foreach (var name in new[] { nameof(QueueEnabled), nameof(ModelsEnabled), nameof(ModuleSummary), nameof(QueueModuleState), nameof(ModelsModuleState) }) Changed(name);
             var queueSettings=await backend.Call("get_queue_resumption_settings");
             queueConsents=queueSettings.GetProperty("consents").Deserialize<QueueResumeConsent[]>(Json.Options)!;
             Changed(nameof(QueueResumeSummary));
+            var cleanup=await backend.Call("get_idle_cleanup_settings");idleSaved=cleanup.GetProperty("settings").Deserialize<IdleCleanupSettings>(Json.Options)!;
+            if(!idleLoaded){IdleCleanupEnabled=idleSaved.Enabled;IdleMinutes=idleSaved.IdleMinutes;idleDraftVersion=idleSaved.Version;idleLoaded=true;}
+            var cleanupStates=cleanup.GetProperty("statuses").Deserialize<IdleCleanupStatus[]>(Json.Options)!;
+            var confirmed=cleanup.GetProperty("tickets").EnumerateArray().Count(t=>t.GetProperty("state").GetString()=="CONFIRMED");
+            IdleCleanupProgress=(cleanupStates.Length==0?"暂无待清理的窗口许可。":string.Join("\n",cleanupStates.Select(s=>$"许可{s.LeaseId[..Math.Min(8,s.LeaseId.Length)]} · {s.Reason}")))+$"\n已确认清理释放：{confirmed} 项。";
+            Changed(nameof(IdleCleanupSummary));Changed(nameof(IdleCleanupProgress));
             var supervisorSettings = await backend.Call("get_supervisor_settings");
             supervisorConfigs = supervisorSettings.GetProperty("configs").Deserialize<SupervisorConfig[]>(Json.Options)!;
             modelExclusions = supervisorSettings.GetProperty("exclusions").Deserialize<ModelExclusions[]>(Json.Options)!;
@@ -280,19 +333,20 @@ public sealed class MainViewModel : Observable, IDisposable
             Changed(nameof(SupervisorSummary));
             Changed(nameof(ExclusionSummary));
             ServiceOnline = true; Paused = health.GetProperty("paused").GetBoolean();
-            var rows = (await backend.Call("list_tests")).Deserialize<Job[]>(Json.Options)!;
-            var selected = SelectedJob?.Id;
-            Jobs.Clear(); foreach (var job in rows) Jobs.Add(new(job));
-            SelectedJob = Jobs.FirstOrDefault(j => j.Id == selected);
+            await RefreshQueueRows(forceNames);
             var decisions = (await backend.Call("list_model_decisions")).Deserialize<ModelDecision[]>(Json.Options)!;
             Decisions.Clear(); foreach (var d in decisions) Decisions.Add(new(d));
             var candidateId = SelectedCandidate?.Id;
             var snapshots = (await backend.Call("list_candidates")).Deserialize<Candidate[]>(Json.Options)!;
             Candidates.Clear(); foreach (var candidate in snapshots) Candidates.Add(new(candidate));
             SelectedCandidate = Candidates.FirstOrDefault(c => c.Id == candidateId); Changed(nameof(SelectedCandidate));
+            QueueDataFresh = true;
+            LastQueueSync = DateTimeOffset.Now;
+            NotifyQueueSelection();
+            if(Notice=="刷新失败，请查看诊断日志。")SetNotice("刷新已恢复。");
         }
-        catch (DispatchException ex) when (ex.Code == "TEST_CENTER_OFFLINE") { ServiceOnline = false; }
-        catch (Exception ex) { backend.Log.Write("UI_REFRESH_FAILED", "刷新失败", error: ex); SetNotice("刷新失败，请查看诊断日志。"); }
+        catch (DispatchException ex) when (ex.Code == "TEST_CENTER_OFFLINE") { ServiceOnline = false; QueueDataFresh = false; NotifyQueueSelection(); }
+        catch (Exception ex) { QueueDataFresh = false; NotifyQueueSelection(); backend.Log.Write("UI_REFRESH_FAILED", "刷新失败", error: ex); SetNotice("刷新失败，请查看诊断日志。"); }
         finally
         {
             refreshing = false;
@@ -332,7 +386,7 @@ public sealed class MainViewModel : Observable, IDisposable
         rulesInstalled = result.GetProperty("rulesInstalled").GetBoolean();
         bridgeReachable = result.TryGetProperty("bridgeReachable", out var reachable) && reachable.GetBoolean();
         HomePath = result.GetProperty("targetHome").GetString()!;
-        if (ServiceOnline) await backend.Call("set_runtime_source", new { home = HomePath });
+        if (ServiceOnline && Path.IsPathFullyQualified(HomePath) && Directory.Exists(HomePath)) await backend.Call("set_runtime_source", new { home = HomePath });
         ConnectionSummary = result.GetProperty("mcpRegistered").GetBoolean() ? "已注册 · 原窗口待重载" : "未注册";
         RulesSummary = result.GetProperty("rulesInstalled").GetBoolean() ? "已安装模拟规则" : "未安装";
         BridgeSummary = result.TryGetProperty("bridgeReachable", out var reach) && reach.GetBoolean() ? "桥连接可用" : "桥连接失败";
@@ -365,17 +419,29 @@ public sealed class MainViewModel : Observable, IDisposable
     public void Dispose() => timer.Stop();
 }
 
-public sealed record JobRow(Job Raw)
+public sealed partial class JobRow(Job raw,QueueWindowGroup? windowGroup=null) : Observable
 {
+    public Job Raw {get;private set;}=raw;
+    public QueueWindowGroup? WindowGroup {get;}=windowGroup;
+    public bool IsGroup=>false;
+    public bool IsExpanded {get=>false;set{}}
+    private bool isSelected;
+    public bool IsSelected {get=>isSelected;set{isSelected=value;Changed();}}
+    public void Update(Job job, bool ownerChanged = false)
+    {
+        if (ReferenceEquals(Raw, job) && !ownerChanged) return;
+        Raw=job;
+        foreach(var name in new[]{nameof(Raw),nameof(Name),nameof(Session),nameof(State),nameof(Resources),nameof(Time),nameof(CanManualRelease),nameof(IsTerminal),nameof(SortPriority),nameof(StateForeground),nameof(StateBackground),nameof(TaskForeground),nameof(TaskHeading),nameof(ConsoleState)})Changed(name);
+    }
     public string Id => Raw.Id;
     public string Name => Raw.Suite.Name;
-    public string Session => Raw.Request.SessionId;
+    public string Session => WindowGroup?.Title??Raw.Request.SessionId;
+    public bool CanManualRelease=>Raw.State is JobState.Queued or JobState.Offered or JobState.WaitingForClient || Raw.Suite.Runner=="external-agent" && Raw.State is JobState.Running or JobState.Cleanup or JobState.RecoveryRequired;
     public string State => Raw.Suite.Runner == "external-agent" && Raw.State == JobState.Running ? (Raw.Summary.StartsWith("已获得恢复许可", StringComparison.Ordinal) ? "待恢复现场" : "窗口使用中") :
         Raw.State == JobState.Released && Raw.Summary.StartsWith("已保存现场并让出", StringComparison.Ordinal) ? "已让出 · 任务未完" : Display(Raw.State);
-    public string Resources => Raw.Suite.Runner == "external-agent" ? (Raw.Suite.Resources.Contains("sw-main") ? "SW / 桌面" : "桌面")
-        : Raw.Suite.Resources.Contains("sw-main") ? (Raw.Suite.Resources.Contains("desktop-ui") ? "SW与桌面输入" : "仅SolidWorks")
-        : Raw.Suite.Resources.Any(r=>r.StartsWith("app:",StringComparison.Ordinal)) ? string.Join(" / ",Raw.Suite.Resources) : "后台";
-    public string Time => Raw.CreatedAt.ToLocalTime().ToString("HH:mm:ss");
+    public string Resources => ResourceNames(Raw.Suite.Resources);
+    public static string ResourceNames(string[] resources)=>resources.Length==0?"后台":string.Join(" / ",resources.Select(r=>r switch{"sw-main"=>"SolidWorks","desktop-ui"=>"桌面输入",_ when r.StartsWith("app:",StringComparison.Ordinal)=>r[4..],_=>r}));
+    public string Time => Raw.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss");
     public static string Display(JobState state) => state switch { JobState.Queued => "等待中", JobState.Offered => "待原窗口接单",JobState.WaitingForClient => "等待聊天接续", JobState.Running => "执行中", JobState.Cleanup => "清理中", JobState.Passed => "已通过", JobState.Failed => "失败", JobState.Cancelled => "已取消", JobState.TimedOut => "已超时", JobState.Blocked => "环境阻塞", JobState.Released => "许可已释放", _ => "需要恢复" };
 }
 public sealed record DecisionRow(ModelDecision Raw)

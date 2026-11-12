@@ -1,0 +1,26 @@
+<Window x:Class="Dispatch.Desktop.ManualReleaseDialog" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="解除这一次提交" Width="540" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F5F6F8" FontFamily="Microsoft YaHei UI" FontSize="13">
+ <Window.Resources>
+  <Style TargetType="Button"><Setter Property="Padding" Value="18,9"/><Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="#202731"/><Setter Property="BorderBrush" Value="#D9DEE5"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"><ContentPresenter HorizontalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter Property="Opacity" Value="0.85"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+ </Window.Resources>
+ <StackPanel Margin="24">
+  <TextBlock Text="解除这一次提交" FontSize="19" FontWeight="SemiBold"/>
+  <Border Background="White" CornerRadius="8" Padding="16" Margin="0,16"><StackPanel>
+   <TextBlock Text="{Binding Session}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding Time}" Foreground="#657185" Margin="0,5"/>
+   <TextBlock Text="{Binding Name}" TextWrapping="Wrap" MaxHeight="70" TextTrimming="CharacterEllipsis"/>
+   <TextBlock Margin="0,8,0,0"><Run Text="{Binding Resources,Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding State,Mode=OneWay}"/></TextBlock>
+   <TextBlock Text="{Binding Id}" FontSize="11" Foreground="#657185" Margin="0,7,0,0"/>
+  </StackPanel></Border>
+  <TextBlock x:Name="Explanation" TextWrapping="Wrap" Margin="0,0,0,12"/>
+  <StackPanel x:Name="CleanupChecks">
+   <CheckBox x:Name="Stopped" Content="我已确认这一次提交的相关操作全部停止" Margin="0,7" Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+   <CheckBox x:Name="Cleaned" Content="我已确认自建测试资源已清理，无遗留异步操作" Margin="0,7" Checked="ConfirmationChanged" Unchecked="ConfirmationChanged"/>
+  </StackPanel>
+  <TextBlock Text="仅处理所选提交。同组其他任务、Codex 聊天及用户软件和文档保持原样。" Foreground="#657185" TextWrapping="Wrap" Margin="0,12"/>
+  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+   <Button Content="取消" IsCancel="True" Margin="0,0,10,0"/>
+   <Button x:Name="ConfirmButton" Content="确认解除" Background="#B92335" Foreground="White" BorderBrush="#B92335" IsEnabled="False" Click="Confirm"/>
+  </StackPanel>
+ </StackPanel>
+</Window>

@@ -1,4 +1,4 @@
-﻿# 只定位已安装SDK文件，不创建COM对象、不启动或操作SolidWorks。
+# 只定位已安装SDK文件，不创建COM对象、不启动或操作SolidWorks。
 $interopCandidates=@()
 if($env:SOLIDWORKS_INTEROP_PATH){$interopCandidates+= $env:SOLIDWORKS_INTEROP_PATH}
 foreach($process in @(Get-Process -Name SLDWORKS -ErrorAction SilentlyContinue)) {

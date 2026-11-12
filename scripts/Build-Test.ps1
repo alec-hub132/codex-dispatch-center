@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([ValidateSet('Debug','Release')][string]$Configuration='Debug')
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent
@@ -20,6 +20,8 @@ try {
     if($LASTEXITCODE -ne 0) { throw '续跑策略测试失败' }
     python tests/test_connection.py
     if($LASTEXITCODE -ne 0) { throw '连接安装器测试失败' }
+    python tests/test_resource_step.py
+    if($LASTEXITCODE -ne 0) { throw '测试段清理释放检查失败' }
     python tests/integration_smoke.py
     if($LASTEXITCODE -ne 0) { throw '进程集成测试失败' }
     $testKey='desktop-'+[Guid]::NewGuid().ToString('N')

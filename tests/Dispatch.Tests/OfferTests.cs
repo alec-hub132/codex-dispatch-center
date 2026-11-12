@@ -3,7 +3,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class OfferTests
 {
-    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "offer-tests"),Guid.NewGuid().ToString("N"));
+    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "offer-tests"),Guid.NewGuid().ToString("N"));
     private static ResourceRequest Request(string id,string resource="solidworks")=>new(id,"window",resource,"接单状态验证，不操作软件",60,true);
     [Fact] public void Offer_is_not_permission_and_timeout_starts_only_after_acceptance()
     {

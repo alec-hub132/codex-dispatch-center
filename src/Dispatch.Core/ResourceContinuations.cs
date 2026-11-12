@@ -99,7 +99,7 @@ public sealed partial class Scheduler
             var updated = cp with { State = "Yielded" };
             store.SaveBatch(new("job", job.Id, yielded), new("resource-checkpoint", cp.Id, updated),
                 Notice(leaseId, cp.Id, "YIELDED", "资源已让出；需要继续操作时重新排队，获准后先恢复现场。"));
-            jobs[job.Id] = yielded;
+            RememberJob(yielded);
             Log.Write("RESOURCE_YIELDED", yielded.Summary, job.Id);
             return updated;
         }
@@ -127,7 +127,7 @@ public sealed partial class Scheduler
             var updated = cp with { State = "ResumeQueued", ResumeLeaseId = job.Id, ResumeRequestId = requestId };
             store.SaveBatch(new("job", job.Id, job), new("permit", job.Id, permit), new("resource-checkpoint", cp.Id, updated),
                 Notice(leaseId, cp.Id, "RESUME_QUEUED", "已在当前队尾申请恢复；等待时不操作宿主。"));
-            sequence = job.Sequence; jobs[job.Id] = job; permits[job.Id] = permit;
+            sequence = job.Sequence; RememberJob(job); permits[job.Id] = permit;
             return PermitView(permit);
         }
     }
@@ -163,7 +163,7 @@ public sealed partial class Scheduler
             var next = job with { State = ok ? JobState.Running : JobState.RecoveryRequired, Summary = message, CleanupStatus = "UNCERTAIN" };
             store.SaveBatch(new("resource-checkpoint", cp.Id, updated), new("workspace-operation", leaseId, op with { State = "Done" }), new("job", job.Id, next),
                 Notice(cp.SourceLeaseId, cp.Id, ok ? "RESTORED" : "RESTORE_BLOCKED", message));
-            jobs[job.Id] = next; Log.Write(ok ? "WORKSPACE_RESTORED" : "WORKSPACE_RESTORE_BLOCKED", message, leaseId);
+            RememberJob(next); Log.Write(ok ? "WORKSPACE_RESTORED" : "WORKSPACE_RESTORE_BLOCKED", message, leaseId);
             return updated;
         }
     }
@@ -175,7 +175,7 @@ public sealed partial class Scheduler
             if (op is null) return;
             var job = Find(leaseId) with { State = JobState.RecoveryRequired, CleanupStatus = "UNCERTAIN", Summary = message };
             store.SaveBatch(new("workspace-operation", leaseId, op with { State = "Done" }), new("job", leaseId, job));
-            jobs[leaseId] = job; Log.Write("WORKSPACE_OPERATION_FAILED", message, leaseId);
+            RememberJob(job); Log.Write("WORKSPACE_OPERATION_FAILED", message, leaseId);
         }
     }
     public ResourceNotice[] GetResourceEvents(string leaseId, string token, long afterSequence)

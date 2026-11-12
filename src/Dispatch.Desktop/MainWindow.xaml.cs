@@ -6,7 +6,16 @@ namespace Dispatch.Desktop;
 
 public partial class MainWindow : Window
 {
-    public MainWindow() { InitializeComponent(); Closed += (_, _) => (DataContext as MainViewModel)?.Dispose(); }
+    public MainWindow()
+    {
+        InitializeComponent();
+        DataContextChanged+=(_,e)=>{if(e.NewValue is MainViewModel vm)vm.ConfirmManualRelease=row=>Task.FromResult(new ManualReleaseDialog(row){Owner=this}.ShowDialog()==true);};
+        Closed += (_, _) => (DataContext as MainViewModel)?.Dispose();
+    }
+    private void QueueSelectionChanged(object sender,RoutedPropertyChangedEventArgs<object> e)
+    {
+        if(DataContext is MainViewModel {IsRefreshing:false} vm)vm.SelectedJob=e.NewValue as JobRow;
+    }
 }
 public sealed class PageVisibility : IValueConverter
 {

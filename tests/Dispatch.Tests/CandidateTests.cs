@@ -5,7 +5,7 @@ namespace Dispatch.Tests;
 
 public sealed class CandidateTests
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "candidate-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "candidate-tests"), Guid.NewGuid().ToString("N"));
     private string Prepare()
     {
         var source = Path.Combine(root, "source"); Directory.CreateDirectory(source);

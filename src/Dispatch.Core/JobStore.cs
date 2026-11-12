@@ -45,6 +45,17 @@ public sealed class JobStore : IDisposable
         return result;
     }
 
+    public T? LoadOne<T>(string kind, string id) where T : class
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT body FROM records WHERE kind=$kind AND id=$id";
+        command.Parameters.AddWithValue("$kind", kind);
+        command.Parameters.AddWithValue("$id", id);
+        return command.ExecuteScalar() is string body
+            ? JsonSerializer.Deserialize<T>(body, Json.Options) ?? throw new InvalidDataException("无效数据库记录")
+            : null;
+    }
+
     public void Save<T>(string kind, string id, T value)
         => SaveBatch(new StoreWrite(kind, id, value!));
 

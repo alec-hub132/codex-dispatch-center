@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sendQueueWakeOnce } from '../scripts/queue-wake-policy.mjs';
+import { deliveryRoute } from '../scripts/queue-wake-policy.mjs';
 const plan={leaseId:'lease-a',wakeId:'lease-a-1',threadId:'thread-a',sourceTurnId:'turn-a',prompt:'仅接续原任务',token:'not-for-logs'};
+test('清理与接单分别核验和落回执，拒绝未知发送类型',()=>{
+ assert.deepEqual(deliveryRoute({kind:'idle-cleanup'}),{method:'begin_idle_cleanup_send',journalPrefix:'idle-cleanup-'});
+ assert.deepEqual(deliveryRoute({}),{method:'begin_queue_wake_send',journalPrefix:'queue-wake-'});
+ assert.throws(()=>deliveryRoute({kind:'other'}));
+});
 function fixture(){
  let claimed=false;const events=[];
  return {events,claim:async()=>{if(claimed)return false;claimed=true;return true;},preflight:async()=>events.push('owner'),

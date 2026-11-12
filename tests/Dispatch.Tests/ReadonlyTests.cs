@@ -18,7 +18,7 @@ public sealed class ReadonlyTests
     [Fact]
     public void Environment_block_does_not_count_as_pass_or_keep_clean_resource_locked()
     {
-        var root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "dispatch-tests"), Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.Combine(Path.GetTempPath(), "dispatch-tests"), Guid.NewGuid().ToString("N"));
         using var scheduler = new Scheduler(new JobStore(root));
         scheduler.Submit(new("native-test", "只读测试", "sw-readonly"));
         var native = Assert.Single(scheduler.Claim());

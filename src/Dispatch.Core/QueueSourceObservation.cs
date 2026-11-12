@@ -127,14 +127,14 @@ public sealed partial class Scheduler
             {
                 var job=Find(b.LeaseId);if(job.State is not (JobState.Queued or JobState.Offered or JobState.WaitingForClient))continue;
                 var c=FindQueueSource(b.LeaseId);
-                if(c is null){Save(job with{State=JobState.WaitingForClient,Summary="缺少绑定读取边界，等待原窗口显式确认；不猜测空闲。"});continue;}
+                if(c is null){Save(job with{State=JobState.WaitingForClient,UserPriority=false,Summary="缺少绑定读取边界，等待原窗口显式确认；不猜测空闲。"});continue;}
                 var next=RefreshQueueSource(b,c);if(next!=c)store.Save("queue-source",b.LeaseId,next);
                 // 15秒心跳只控制能否创建新预留。既有预留按自身30秒期限结束；
                 // 聊天开始处理自己的接续消息不应把预留提前撤销。
                 if(job.State==JobState.Offered && !next.Blocked && QueueBindingAllowed(b.LeaseId))continue;
                 if(!QueueBindingAllowed(b.LeaseId) || !QueueSourceAllowsOffer(b.LeaseId))
                 {
-                    if(job.State!=JobState.WaitingForClient)Save(job with{State=JobState.WaitingForClient,Summary=next.Blocked?"原聊天有新任务、停止或日志变化，旧任务等待确认。":"原聊天尚在执行或记录未完整，未占用软件，等待接续。"});
+                    if(job.State!=JobState.WaitingForClient)Save(job with{State=JobState.WaitingForClient,UserPriority=false,Summary=next.Blocked?"原聊天有新任务、停止或日志变化，旧任务等待确认。":"原聊天尚在执行或记录未完整，未占用软件，等待接续。"});
                     continue;
                 }
                 var offer=FindResourceOffer(b.LeaseId);
@@ -142,7 +142,7 @@ public sealed partial class Scheduler
                 var canContinue=lastWake is null || lastWake.State=="SENT" && lastWake.NewTurnId==b.SourceTurnId && next.LatestTurnId==b.SourceTurnId;
                 if(job.State==JobState.WaitingForClient && next.Finished && canContinue && job.Generation<3 && GetModules().QueueEnabled && !paused &&
                    (offer is null || clock.GetUtcNow()>=offer.ExpiresAt.AddSeconds(2)))
-                    Save(job with{State=JobState.Queued,Sequence=++sequence,Summary="原聊天已正常结束本轮，原任务回到队尾等待接单。"});
+                    Save(job with{State=JobState.Queued,UserPriority=false,Sequence=++sequence,Summary="原聊天已正常结束本轮，原任务回到队尾等待接单。"});
             }
         }
     }
@@ -165,6 +165,7 @@ public sealed partial class Scheduler
             {
                 var b=GetQueueBindings().SingleOrDefault(b=>b.LeaseId==job.Id);var c=FindQueueSource(job.Id);
                 var previous=FindQueueWake(job.Id);
+                if(b is not null && GetIdleCleanupTickets().Any(t=>t.ThreadId==b.ThreadId && t.State is "DISPATCHING" or "SENDING" or "SENT"))continue;
                 if(b is null || c is not {Blocked:false,CaughtUp:true,Finished:true} || !QueueBindingAllowed(job.Id) ||
                     previous is not null && (previous.Generation==job.Generation || previous.State!="SENT" || previous.NewTurnId!=b.SourceTurnId) ||
                     GetQueueWakes().Any(w=>w.ThreadId==b.ThreadId && (w.State is "DISPATCHING" or "SENDING" || w.LeaseId!=job.Id && w.State=="SENT" &&

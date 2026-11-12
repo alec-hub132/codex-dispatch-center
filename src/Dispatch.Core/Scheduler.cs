@@ -20,10 +20,13 @@ public sealed partial class Scheduler : IDisposable
         this.clock = clock ?? TimeProvider.System;
         Log = new(Path.Combine(store.Root, "logs"));
         jobs = store.Load<Job>("job").ToDictionary(j => j.Id);
+        foreach (var job in jobs.Values) jobRevisions[job.Id] = ++queueRevision;
         decisions = store.Load<ModelDecision>("decision").ToDictionary(d => d.Id);
         permits = store.Load<PermitRecord>("permit").ToDictionary(p => p.JobId);
         paused = store.Load<bool>("paused").FirstOrDefault();
+        hostControlBusy=store.Load<bool>("host-control").FirstOrDefault();
         sequence = jobs.Values.Select(j => j.Sequence).DefaultIfEmpty().Max();
+        InterruptHostRecovery();
         InterruptWorkspaceOperations();
         InterruptQueueWakes();
         InterruptIdleCleanup();
@@ -60,9 +63,10 @@ public sealed partial class Scheduler : IDisposable
             CheckResourceOffers();
             if (paused || !GetModules().QueueEnabled) return [];
             var busy = jobs.Values.Where(HoldsResources).SelectMany(j => j.Suite.Resources).ToHashSet(StringComparer.Ordinal);
+            if(HostRecoveryBlocking || hostControlBusy)busy.Add("sw-main");
             var reserved = new HashSet<string>(StringComparer.Ordinal);
             var claimed = new List<Job>();
-            foreach (var job in jobs.Values.Where(j => j.State == JobState.Queued).OrderBy(j => j.Sequence).ToArray())
+            foreach (var job in jobs.Values.Where(j => j.State == JobState.Queued).OrderByDescending(j => j.UserPriority).ThenBy(j => j.Sequence).ToArray())
             {
                 if (job.Suite.Resources.Any(r => busy.Contains(r) || reserved.Contains(r)))
                 {
@@ -70,7 +74,7 @@ public sealed partial class Scheduler : IDisposable
                     continue;
                 }
                 if(TryCreateResourceOffer(job)){if(Find(job.Id).State==JobState.Offered)busy.UnionWith(job.Suite.Resources);continue;}
-                var next = job with { State = JobState.Running, Generation = job.Generation + 1, StartedAt = DateTimeOffset.UtcNow, Summary = job.Suite.SimulationOnly ? "模拟执行中" : "真实只读检查执行中", CleanupStatus = "UNCERTAIN" };
+                var next = job with { State = JobState.Running, UserPriority = false, Generation = job.Generation + 1, StartedAt = DateTimeOffset.UtcNow, Summary = job.Suite.SimulationOnly ? "模拟执行中" : "真实只读检查执行中", CleanupStatus = "UNCERTAIN" };
                 if (next.Suite.Runner == "external-agent")
                 {
                     if (RestoreCheckpoint(next.Id) is not null) next = next with { Summary = "已获得恢复许可；先恢复文档、视图与选择并回读，尚不能继续原业务。" };
@@ -163,7 +167,7 @@ public sealed partial class Scheduler : IDisposable
     private void Save(Job job)
     {
         store.Save("job", job.Id, job);
-        jobs[job.Id] = job;
+        RememberJob(job);
         Log.Write(job.State.ToString(), job.Summary, job.Id);
     }
     private static bool HoldsResources(Job job) => job.State is JobState.Running or JobState.Cleanup or JobState.RecoveryRequired or JobState.Offered;

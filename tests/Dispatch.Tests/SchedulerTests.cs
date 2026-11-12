@@ -5,7 +5,7 @@ namespace Dispatch.Tests;
 
 public sealed class SchedulerTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "dispatch-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "dispatch-tests"), Guid.NewGuid().ToString("N"));
     private Scheduler Open() => new(new JobStore(root));
     private static Submission Request(string id, string suite = "mock-sw", string session = "窗口A") => new(id, session, suite);
 

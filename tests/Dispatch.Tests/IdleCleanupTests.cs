@@ -5,7 +5,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class IdleCleanupTests
 {
-    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "idle-cleanup-tests"),Guid.NewGuid().ToString("N"));
+    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "idle-cleanup-tests"),Guid.NewGuid().ToString("N"));
     private const string Thread="11111111-1111-4111-8111-111111111111";
     private string Source=>Path.Combine(root,"codex","sessions","rollout-"+Thread+".jsonl");
     private readonly Clock clock=new();
@@ -86,6 +86,51 @@ public sealed class IdleCleanupTests
         var other=s.RequestResource(new("b","free-alias","app:other","未知原聊天",1800));s.Claim();
         s.SetIdleCleanupSettings(s.GetIdleCleanupSettings() with{Enabled=true});clock.Utc=clock.Utc.AddMinutes(11);Assert.Null(s.ClaimIdleCleanup());
         Assert.Equal("Granted",s.GetResource(other.Job.Id,other.Token).Status);
+    }
+    [Fact] public async Task Cleanup_plan_is_private_and_settings_never_inherit_queue_resume_consent()
+    {
+        using var s=new Scheduler(new JobStore(root),clock);var p=Setup(s);
+        Record("event_msg",new{type="task_complete",turn_id="turn-a"});clock.Utc=clock.Utc.AddMinutes(11);
+        var ticket=s.ClaimIdleCleanup();Assert.NotNull(ticket);
+        var plan=JsonSerializer.SerializeToElement(s.BuildIdleCleanupPlan(p.Job.Id,"fixture-instance"),Json.Options);
+        Assert.Equal("idle-cleanup",plan.GetProperty("kind").GetString());Assert.Equal(ticket.Id,plan.GetProperty("wakeId").GetString());
+        Assert.Equal(p.Token,plan.GetProperty("token").GetString());Assert.DoesNotContain("accept_resource",plan.GetProperty("prompt").GetString()!);
+        Assert.False(s.BeginIdleCleanupSend(p.Job.Id,p.Token,"another-ticket"));
+        var api=new ServiceApi(s);var view=JsonSerializer.Serialize(await api.Execute("get_idle_cleanup_settings",JsonSerializer.SerializeToElement(new{}),CancellationToken.None),Json.Options);
+        Assert.DoesNotContain(p.Token,view);Assert.Contains("DISPATCHING",view);
+        s.SetIdleCleanupSettings(s.GetIdleCleanupSettings() with{Enabled=false});Assert.False(s.BeginIdleCleanupSend(p.Job.Id,p.Token,ticket.Id));
+    }
+    [Fact] public void Same_chat_cannot_receive_test_resumption_while_cleanup_is_pending()
+    {
+        using var s=new Scheduler(new JobStore(root),clock);Setup(s);Record("event_msg",new{type="task_complete",turn_id="turn-a"});
+        clock.Utc=clock.Utc.AddMinutes(11);Assert.NotNull(s.ClaimIdleCleanup());
+        s.SetQueueResumeConsent(new(Thread,true));
+        s.RequestResource(new("b",Thread,"app:other","接续互斥",60,true,Thread,"turn-a","仅读报告"));s.Claim();
+        Assert.Null(s.ClaimQueueWake());
+    }
+    [Fact] public void Unknown_alias_can_be_explicitly_bound_without_changing_lease_or_authorizing_wakeup()
+    {
+        using var s=new Scheduler(new JobStore(root),clock);Setup(s);
+        var other=s.RequestResource(new("alias","old-free-alias","app:other","补充绑定",600));s.Claim();
+        var bound=s.SetIdleCleanupOwner(other.Job.Id,Thread);Assert.Equal(Thread,bound.ThreadId);
+        Assert.Equal("Granted",s.GetResource(other.Job.Id,other.Token).Status);
+        Assert.Throws<DispatchException>(()=>s.SetIdleCleanupOwner(other.Job.Id,"another-alias"));
+        Assert.Equal("WINDOW_ACTIVE",s.GetIdleCleanupStatuses().Single(x=>x.LeaseId==other.Job.Id).Status);
+    }
+    [Fact] public void Owner_can_report_uncertain_cleanup_then_confirm_later_without_repeat_wakeup()
+    {
+        using var s=new Scheduler(new JobStore(root),clock);var p=Setup(s);Record("event_msg",new{type="task_complete",turn_id="turn-a"});
+        clock.Utc=clock.Utc.AddMinutes(11);Assert.NotNull(s.ClaimIdleCleanup());
+        s.ReleaseResource(p.Job.Id,p.Token,1,false);Assert.Equal("CLEANUP_UNCONFIRMED",s.GetIdleCleanupTickets().Single().State);
+        Assert.Null(s.ClaimIdleCleanup());s.ReleaseResource(p.Job.Id,p.Token,1,true);
+        Assert.Equal("CONFIRMED",s.GetIdleCleanupTickets().Single().State);
+    }
+    [Fact] public void Late_real_release_after_unknown_delivery_is_recorded_without_retry()
+    {
+        using var s=new Scheduler(new JobStore(root),clock);var p=Setup(s);Record("event_msg",new{type="task_complete",turn_id="turn-a"});clock.Utc=clock.Utc.AddMinutes(11);
+        var t=s.ClaimIdleCleanup();Assert.NotNull(t);s.RecordIdleCleanupSend(p.Job.Id,t.Id,null);
+        Assert.Equal("STOPPED_NO_RETRY",s.GetIdleCleanupTickets().Single().State);
+        s.ReleaseResource(p.Job.Id,p.Token,1,true);Assert.Equal("CONFIRMED",s.GetIdleCleanupTickets().Single().State);Assert.Null(s.ClaimIdleCleanup());
     }
     private sealed class Clock:TimeProvider
     {public DateTimeOffset Utc=DateTimeOffset.UtcNow;public override DateTimeOffset GetUtcNow()=>Utc;}

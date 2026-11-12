@@ -4,25 +4,40 @@ using System.Text.Json;
 
 namespace Dispatch.Core;
 
-public sealed class ServiceApi(Scheduler scheduler, Action? stopService = null, Func<string, JsonElement, CancellationToken, Task<object>>? workspace = null, Func<string,string,object>? continuation = null)
+public sealed class ServiceApi(Scheduler scheduler, Action? stopService = null, Func<string, JsonElement, CancellationToken, Task<object>>? workspace = null, Func<string,string,object>? continuation = null, Func<CancellationToken,Task<object>>? recheckHost = null, Func<string,CancellationToken,Task<object>>? hostControl = null, Func<string>? hostStatus = null)
 {
     private readonly CandidateStore candidates = new(Path.Combine(scheduler.Root, "candidates"));
     public async Task<object> Execute(string method, JsonElement args, CancellationToken token)
     {
         switch (method)
         {
-            case "get_health": return new { protocolVersion = 1, serviceVersion = "0.11.3", daemonRunning = true, simulationOnly = false, readonlySolidWorksSupported = true, modelSwitchSupported = false,
+            case "get_health":
+                var counts = scheduler.GetQueueCounts();
+                return new { protocolVersion = 1, serviceVersion = "0.21.0", daemonRunning = true, simulationOnly = false, readonlySolidWorksSupported = true, modelSwitchSupported = false,
                 modelHandoffProtocolSupported = true, supervisorReturnRequired = true, independentModulesSupported = true, supervisorTakeoverProtocolSupported = true,
                 runtimeModelSwitchSupported = false, automaticContinuationSupported = false, modelContinuationRegistrationSupported = continuation is not null, runtimeEvidenceVerificationSupported = true,
                 resourceContinuationProtocolSupported = true, workspaceAdapterAvailable = workspace is not null, automaticResourceWakeupSupported = false,
+                idleCleanupProtocolSupported = true, automaticIdleCleanupVerified = false, idleCleanupEnabled=scheduler.GetIdleCleanupSettings().Enabled,
+                solidWorksCrashRecoveryEnabled=scheduler.GetHostRecoverySettings().Enabled,solidWorksRecoveryBlocked=scheduler.HostRecoveryBlocking,
                 modelExclusions = scheduler.GetModelExclusions(), modules = scheduler.GetModules(),
-                resourcePermitsSupported = true, activeResourcePermits = scheduler.List().Count(j => j.Suite.Runner == "external-agent" && j.State == JobState.Running),
-                paused = scheduler.Paused, queueDepth = scheduler.List().Count(j => j.State == JobState.Queued),
-                recoveryRequired = scheduler.List().Count(j => j.State == JobState.RecoveryRequired) };
+                resourcePermitsSupported = true, activeResourcePermits = counts.ActivePermits,
+                paused = scheduler.Paused, queueDepth = counts.Queued, offered = counts.Offered, waitingForClient = counts.WaitingForClient,
+                recoveryRequired = counts.Recovery };
             case "arm_model_continuation":
                 if(continuation is null)throw new DispatchException("UNSUPPORTED","当前服务没有配置单次续跑执行器。");
                 return continuation(Text(args,"decisionId"),Text(args,"token"));
             case "get_module_settings": return scheduler.GetModules();
+            case "detect_solidworks_path":
+            case "open_solidworks":
+            case "close_solidworks":
+            case "detect_solidworks_errors":
+                if(hostControl is null)throw new DispatchException("UNSUPPORTED","当前服务没有配置宿主管理。");
+                return await hostControl(method,token);
+            case "get_host_recovery_settings": return new{settings=scheduler.GetHostRecoverySettings(),incident=scheduler.GetHostRecovery(),controlPending=scheduler.HostControlBusy,monitor=hostStatus?.Invoke()};
+            case "set_host_recovery_settings": return scheduler.SetHostRecoverySettings(args.Deserialize<HostRecoverySettings>(Json.Options)??throw Invalid());
+            case "recheck_host_recovery":
+                if(recheckHost is null)throw new DispatchException("UNSUPPORTED","当前服务没有配置宿主恢复检查。");
+                return await recheckHost(token);
             case "set_runtime_source": return scheduler.SetRuntimeSource(Text(args, "home"));
             case "get_runtime_observation": return new { observation = scheduler.ObserveModelRuntime(Text(args, "sessionId")) };
             case "verify_model_runtime": return scheduler.VerifyModelRuntime(Text(args, "decisionId"), Text(args, "token"));
@@ -32,6 +47,10 @@ public sealed class ServiceApi(Scheduler scheduler, Action? stopService = null, 
             case "get_queue_resumption_settings": return new{consents=scheduler.GetQueueResumeConsents(),bindings=scheduler.GetQueueBindings(),sources=scheduler.GetQueueSourceStates(),wakes=scheduler.GetQueueWakes()};
             case "begin_queue_wake_send": return new{allowed=scheduler.BeginQueueWakeSend(Text(args,"leaseId"),Text(args,"token"),Text(args,"wakeId"))};
             case "set_queue_resume_consent": return scheduler.SetQueueResumeConsent(args.Deserialize<QueueResumeConsent>(Json.Options)??throw Invalid());
+            case "get_idle_cleanup_settings": return new{settings=scheduler.GetIdleCleanupSettings(),tickets=scheduler.GetIdleCleanupTickets(),sources=scheduler.GetIdleCleanupObservations(),statuses=scheduler.GetIdleCleanupStatuses()};
+            case "set_idle_cleanup_owner": return scheduler.SetIdleCleanupOwner(Text(args,"leaseId"),Text(args,"threadId"));
+            case "set_idle_cleanup_settings": return scheduler.SetIdleCleanupSettings(args.Deserialize<IdleCleanupSettings>(Json.Options)??throw Invalid());
+            case "begin_idle_cleanup_send": return new{allowed=scheduler.BeginIdleCleanupSend(Text(args,"leaseId"),Text(args,"token"),Text(args,"wakeId"))};
             case "get_queue_binding": return scheduler.GetQueueBindingState(Text(args,"leaseId"),Text(args,"token"));
             case "accept_resource": return scheduler.AcceptResource(Text(args,"leaseId"),Text(args,"token"),Text(args,"offerId"),args.GetProperty("generation").GetInt32());
             case "retry_resource": return scheduler.RequeueResource(Text(args,"leaseId"),Text(args,"token"),args.TryGetProperty("sourceTurnId",out var queueTurn)?queueTurn.GetString():null);
@@ -63,6 +82,14 @@ public sealed class ServiceApi(Scheduler scheduler, Action? stopService = null, 
             case "release_resource": return scheduler.ReleaseResource(Text(args, "leaseId"), Text(args, "token"),
                 args.GetProperty("generation").GetInt32(), args.GetProperty("cleanupConfirmed").GetBoolean());
             case "list_tests": return scheduler.List();
+            case "list_queue_changes": return scheduler.ListChanges(args.TryGetProperty("epoch",out var epoch)?epoch.GetString():null,
+                args.TryGetProperty("afterRevision",out var revision)?revision.GetInt64():0,
+                args.TryGetProperty("upperRevision",out var upperRevision)&&upperRevision.ValueKind!=JsonValueKind.Null?upperRevision.GetInt64():null);
+            case "get_queue_owners": return scheduler.GetQueueOwners(args.GetProperty("jobIds").Deserialize<string[]>(Json.Options)??throw Invalid());
+            case "manual_release_resource": return scheduler.ManualReleaseResource(args.Deserialize<QueueManualRelease>(Json.Options)??throw Invalid());
+            case "manual_dispatch_test": return scheduler.RequestManualDispatch(args.Deserialize<ManualDispatchRequest>(Json.Options)??throw Invalid());
+            case "list_tests_page": return scheduler.ListPage(args.TryGetProperty("afterSequence",out var after)?after.GetInt64():0,
+                args.TryGetProperty("upperSequence",out var upper)&&upper.ValueKind!=JsonValueKind.Null?upper.GetInt64():null);
             case "freeze_candidate": return CandidateOperation(() => candidates.Freeze(args.Deserialize<FreezeRequest>(Json.Options) ?? throw Invalid()));
             case "list_candidates": return CandidateOperation(candidates.List);
             case "verify_candidate": return CandidateOperation(() => candidates.Verify(Text(args, "candidateId")));

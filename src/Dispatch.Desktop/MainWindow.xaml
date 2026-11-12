@@ -1,6 +1,33 @@
 <Window x:Class="Dispatch.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Dispatch.Desktop"
-        Title="Codex 调度工具" Icon="Assets/app.ico" Width="1120" Height="780" MinWidth="980" MinHeight="700" Background="#F5F6F8" FontFamily="Microsoft YaHei UI" FontSize="13" Foreground="#202731" WindowStartupLocation="CenterScreen">
+        Title="Codex 调度工具" Icon="Assets/app.ico" Width="1440" Height="920" MinWidth="1180" MinHeight="760" Background="#F5F6F8" FontFamily="Microsoft YaHei UI" FontSize="13" Foreground="#202731" WindowStartupLocation="CenterScreen">
  <Window.Resources>
+  <BooleanToVisibilityConverter x:Key="VisibleIfTrue"/>
+  <Style x:Key="WindowQueueTree" TargetType="TreeView">
+   <Setter Property="BorderThickness" Value="0"/><Setter Property="Background" Value="White"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/><Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True"/><Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling"/>
+  </Style>
+  <Style TargetType="TreeViewItem">
+   <Setter Property="IsExpanded" Value="{Binding IsExpanded,Mode=TwoWay}"/><Setter Property="IsSelected" Value="{Binding IsSelected,Mode=TwoWay}"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+   <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></Setter.Value></Setter>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TreeViewItem"><Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <ToggleButton Grid.Column="0" IsChecked="{Binding IsExpanded,RelativeSource={RelativeSource TemplatedParent},Mode=TwoWay}" Visibility="{Binding IsGroup,Converter={StaticResource VisibleIfTrue}}" Width="18" Height="24" Focusable="False" VerticalAlignment="Top" Margin="0,12,0,0"><ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#F0F2F5" CornerRadius="5"><TextBlock x:Name="Arrow" Text="›" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="Text" Value="⌄"/></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template></ToggleButton>
+    <Border x:Name="Selection" Grid.Column="1" CornerRadius="6" Margin="3,2,0,2" Background="{TemplateBinding Background}"><ContentPresenter x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="Stretch"/></Border>
+    <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Grid.Column="1" Margin="0,0,0,10"/>
+   </Grid><ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="False"><Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="Selection" Property="Background" Value="#F9EDEF"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <HierarchicalDataTemplate DataType="{x:Type local:QueueWindowGroup}" ItemsSource="{Binding Children}">
+   <Border Background="#EDF0F4" CornerRadius="6" Padding="12,9" ToolTip="{Binding Identity}"><StackPanel>
+    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Text="{Binding Subtitle}" FontSize="11" Foreground="#657185" Margin="0,4,0,0" TextWrapping="Wrap"/>
+   </StackPanel></Border>
+  </HierarchicalDataTemplate>
+  <DataTemplate DataType="{x:Type local:JobRow}"><Border BorderBrush="#EDF0F4" BorderThickness="0,0,0,1" Padding="8,9" ToolTip="{Binding Name}"><Grid MinHeight="40">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
+   <TextBlock Text="{Binding QueuePosition}" Foreground="{Binding StateForeground}" FontSize="11" VerticalAlignment="Center"/>
+   <StackPanel Grid.Column="1" Margin="6,0,12,0"><TextBlock Text="{Binding TaskHeading}" Foreground="{Binding TaskForeground}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Time}" Foreground="#697586" FontSize="11" Margin="0,4,0,0"/></StackPanel>
+   <TextBlock Grid.Column="2" Text="{Binding Resources}" Foreground="{Binding TaskForeground}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+   <Border Grid.Column="3" Background="{Binding StateBackground}" CornerRadius="5" Padding="7,4" HorizontalAlignment="Left" VerticalAlignment="Center"><TextBlock Text="{Binding ConsoleState}" Foreground="{Binding StateForeground}" FontSize="11"/></Border>
+  </Grid></Border></DataTemplate>
   <Style x:Key="ModuleSwitch" TargetType="CheckBox">
    <Setter Property="Cursor" Value="Hand"/><Setter Property="VerticalContentAlignment" Value="Center"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox"><StackPanel Orientation="Horizontal"><Border x:Name="Track" Width="42" Height="24" CornerRadius="12" Background="#D3D9E1" BorderBrush="#BAC2CE" BorderThickness="1"><Ellipse x:Name="Thumb" Width="16" Height="16" Fill="White" Margin="3" HorizontalAlignment="Left"/></Border><ContentPresenter Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel><ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="#A31E2E"/><Setter TargetName="Track" Property="BorderBrush" Value="#A31E2E"/><Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="#202731"/><Setter TargetName="Track" Property="BorderThickness" Value="2"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
@@ -28,7 +55,7 @@
   <Border Background="White" BorderBrush="#E3E6EB" BorderThickness="0,0,1,0">
    <DockPanel>
     <StackPanel DockPanel.Dock="Top" Margin="18,27,14,28"><Border Background="#B92335" CornerRadius="8" Width="38" Height="38" HorizontalAlignment="Left"><TextBlock Text="调" Foreground="White" FontSize="19" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Codex 调度工具" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,5"/><TextBlock Text="多窗口 · 统一测试队列" Foreground="#7B8491" FontSize="11"/></StackPanel>
-    <StackPanel DockPanel.Dock="Bottom" Margin="18,16"><TextBlock Text="本地运行" Foreground="#596779"/><TextBlock Text="独立工具管理 · 0.11.3" Foreground="#8A929E" FontSize="11" Margin="0,6,0,0"/></StackPanel>
+    <StackPanel DockPanel.Dock="Bottom" Margin="18,16"><TextBlock Text="本地运行" Foreground="#596779"/><TextBlock Text="独立工具管理 · 0.21.0" Foreground="#8A929E" FontSize="11" Margin="0,6,0,0"/></StackPanel>
     <ListBox SelectedIndex="{Binding PageIndex}" BorderThickness="0" Background="Transparent" Padding="10,0" AutomationProperties.AutomationId="Navigation">
      <ListBox.Resources><Style TargetType="ListBoxItem"><Setter Property="Padding" Value="14,13"/><Setter Property="Margin" Value="0,3"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Nav" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Nav" Property="Background" Value="#F9EDEF"/><Setter Property="Foreground" Value="#A31E2E"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Nav" Property="Background" Value="#F3F4F6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></ListBox.Resources>
      <ListBoxItem Content="◫    调度总览"/><ListBoxItem Content="☷    测试队列"/><ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="{Binding ConnectionGlyph}" Foreground="{Binding ConnectionColor}" Width="25" FontWeight="Bold"/><TextBlock Text="Codex 连接"/></StackPanel></ListBoxItem><ListBoxItem Content="⚙    诊断与日志"/><ListBoxItem Content="高级产物留档" Visibility="Collapsed"/><ListBoxItem Content="◉    工具管理"/>
@@ -56,6 +83,36 @@
       <WrapPanel><Button Content="保存排队接续授权" Command="{Binding SaveQueueResumeCommand}"/><Button Content="填入当前主管聊天" Command="{Binding FillQueueThreadCommand}"/></WrapPanel>
       <TextBlock Text="{Binding QueueResumeSummary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
      </StackPanel></Expander>
+    </StackPanel></Border>
+    <Border Style="{StaticResource Card}" Margin="0,0,0,14"><StackPanel>
+     <Expander x:Name="IdleCleanupPanel" Header="无活动窗口自动清理"><StackPanel>
+      <TextBlock Text="连续无活动达到设定时间后，允许工具唤回已核实的原窗口一次，停止自建测试并清理自建资源；确认释放后才放行。保留聊天和用户原有软件、文档。" Style="{StaticResource Subtle}" Margin="0,10,0,12"/>
+      <CheckBox Content="允许原窗口自动清理测试资源和许可" IsChecked="{Binding IdleCleanupEnabled}" Margin="0,0,0,12"/>
+      <WrapPanel VerticalAlignment="Center"><TextBlock Text="连续无活动（分钟）" VerticalAlignment="Center" Margin="0,0,12,0"/>
+       <Border BorderBrush="#D9DEE5" BorderThickness="1" CornerRadius="6" Background="White" Padding="2" Width="86"><TextBox Text="{Binding IdleMinutes, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="Transparent"/></Border>
+      </WrapPanel>
+      <TextBlock Text="可设置1至120分钟。思考、工具调用及已登记测试进程仍运行时不算停止；记录不明时保留隔离。" Style="{StaticResource Subtle}" Margin="0,8,0,10"/>
+      <WrapPanel><Button Content="保存清理设置" Command="{Binding SaveIdleCleanupCommand}"/><Button Content="重新载入已保存设置" Command="{Binding ReloadIdleCleanupCommand}"/></WrapPanel>
+      <TextBlock Text="{Binding IdleCleanupSummary}" TextWrapping="Wrap" Margin="0,8,0,6"/>
+      <TextBlock Text="{Binding IdleCleanupProgress}" Style="{StaticResource Subtle}"/>
+      <Expander Header="旧任务原窗口关联（可选）" Margin="0,12,0,0"><StackPanel>
+       <TextBlock Text="仅当检测提示会话别名不能识别原窗口时填写。许可编号从测试队列读取，聊天编号由原窗口提供。保存只补充关联，不直接释放。" Style="{StaticResource Subtle}" Margin="0,8,0,6"/>
+       <TextBlock Text="许可编号"/><Border BorderBrush="#D9DEE5" BorderThickness="1" CornerRadius="6" Padding="2" Background="White" Margin="0,4,0,10"><TextBox Text="{Binding IdleOwnerLeaseId}" BorderThickness="0" Background="Transparent"/></Border>
+       <TextBlock Text="真实原聊天编号"/><Border BorderBrush="#D9DEE5" BorderThickness="1" CornerRadius="6" Padding="2" Background="White" Margin="0,4,0,10"><TextBox Text="{Binding IdleOwnerThreadId}" BorderThickness="0" Background="Transparent"/></Border>
+       <Button Content="保存原窗口关联" Command="{Binding BindIdleCleanupOwnerCommand}" HorizontalAlignment="Left"/>
+      </StackPanel></Expander>
+     </StackPanel></Expander>
+    </StackPanel></Border>
+    <Border Style="{StaticResource Card}" Margin="0,0,0,14"><StackPanel>
+     <TextBlock Text="SolidWorks 崩溃自动处理" Style="{StaticResource Heading}"/>
+     <TextBlock Text="SolidWorks 程序路径" Style="{StaticResource Subtle}"/>
+     <Border BorderBrush="#D9DEE5" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,6,0,10"><TextBox Text="{Binding SolidWorksPath,UpdateSourceTrigger=PropertyChanged}" BorderThickness="0"/></Border>
+     <WrapPanel Margin="0,0,0,12"><Button Content="从已运行程序获取" Command="{Binding DetectSolidWorksPathCommand}"/><Button Content="保存路径" Command="{Binding SaveSolidWorksPathCommand}"/><Button Content="打开SolidWorks" Command="{Binding OpenSolidWorksCommand}"/><Button Content="关闭SolidWorks" Command="{Binding CloseSolidWorksCommand}"/><Button Content="检测报错弹窗" Command="{Binding DetectSolidWorksErrorsCommand}"/></WrapPanel>
+     <CheckBox Style="{StaticResource ModuleSwitch}" Content="崩溃后自动关闭错误窗并重启" IsChecked="{Binding HostRecoveryEnabled,Mode=OneWay}" Command="{Binding ToggleHostRecoveryCommand}" AutomationProperties.AutomationId="HostRecoverySwitch"/>
+     <TextBlock Text="{Binding HostRecoverySummary}" TextWrapping="Wrap" Margin="0,12,0,8"/>
+     <TextBlock Text="默认关闭，设置即时保存。正常关闭不重启；恢复文件不打开，已识别的恢复副本隔离留档。新实例空白核验后再安排后续测试。" Style="{StaticResource Subtle}"/>
+     <TextBlock Text="{Binding HostRecoveryProgress}" TextWrapping="Wrap" Margin="0,10"/>
+     <Button Content="处理提示后重新检查宿主" Command="{Binding RecheckHostRecoveryCommand}" HorizontalAlignment="Left"/>
     </StackPanel></Border>
     <Border Style="{StaticResource Card}" Margin="0,0,0,14"><StackPanel>
      <TextBlock Text="模型调度" Style="{StaticResource Heading}"/>
@@ -94,15 +151,50 @@
      <Border Style="{StaticResource Card}" Margin="0,0,10,0"><StackPanel><TextBlock Text="模拟通过" Style="{StaticResource Subtle}"/><TextBlock Text="{Binding CompletedCount}" FontSize="26" FontWeight="SemiBold"/></StackPanel></Border>
      <Border Style="{StaticResource Card}" Margin="0,0,10,0"><StackPanel><TextBlock Text="需要关注" Style="{StaticResource Subtle}"/><TextBlock Text="{Binding AttentionCount}" FontSize="26" FontWeight="SemiBold"/></StackPanel></Border>
     </UniformGrid>
-    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,15"><DockPanel><TextBlock DockPanel.Dock="Top" Text="最近测试" Style="{StaticResource Heading}"/><DataGrid ItemsSource="{Binding Jobs}" SelectedItem="{Binding SelectedJob}" AutomationProperties.AutomationId="OverviewJobs"><DataGrid.Columns><DataGridTextColumn Header="测试" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="来源" Binding="{Binding Session}" Width="130"/><DataGridTextColumn Header="状态" Binding="{Binding State}" Width="90"/></DataGrid.Columns></DataGrid></DockPanel></Border>
+    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,15"><DockPanel><TextBlock DockPanel.Dock="Top" Text="最近测试" Style="{StaticResource Heading}"/><TreeView ItemsSource="{Binding QueueGroups}" Style="{StaticResource WindowQueueTree}" SelectedItemChanged="QueueSelectionChanged" AutomationProperties.AutomationId="OverviewJobs"/></DockPanel></Border>
     <Border Grid.Row="2" Style="{StaticResource Card}"><DockPanel><StackPanel DockPanel.Dock="Top"><TextBlock Text="主管与执行模型交接" Style="{StaticResource Heading}"/><TextBlock Text="主管选择执行模型，工具保存周期；执行完成后按固定计划返回主管。" Style="{StaticResource Subtle}" Margin="0,0,0,12"/></StackPanel><DataGrid ItemsSource="{Binding Decisions}"><DataGrid.Columns><DataGridTextColumn Header="目标模型" Binding="{Binding Model}" Width="*"/><DataGridTextColumn Header="判断理由" Binding="{Binding Reason}" Width="*"/><DataGridTextColumn Header="执行状态" Binding="{Binding State}" Width="170"/></DataGrid.Columns></DataGrid></DockPanel></Border>
    </Grid>
-   <!-- 测试队列 -->
+   <!-- 队列操作台 -->
    <Grid Grid.Row="2" Visibility="{Binding PageIndex, Converter={StaticResource Page}, ConverterParameter=1}">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="175"/></Grid.RowDefinitions>
-    <WrapPanel IsEnabled="{Binding CanOperate}" Margin="0,0,0,14"><ComboBox Width="280" ItemsSource="{Binding Suites}" SelectedItem="{Binding SelectedSuite}" Margin="0,0,10,8" AutomationProperties.AutomationId="SuiteSelector"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><Button Content="提交所选检查" Command="{Binding SubmitCommand}" Style="{StaticResource Primary}" Margin="0,0,8,8" AutomationProperties.AutomationId="SubmitMock"/><Button Content="{Binding PauseLabel}" Command="{Binding PauseCommand}" Margin="0,0,8,8"/><Button Content="取消所选" Command="{Binding CancelCommand}" Margin="0,0,8,8"/></WrapPanel>
-    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,14"><DataGrid ItemsSource="{Binding Jobs}" SelectedItem="{Binding SelectedJob}" AutomationProperties.AutomationId="QueueJobs"><DataGrid.Columns><DataGridTextColumn Header="提交时间" Binding="{Binding Time}" Width="85"/><DataGridTextColumn Header="测试／使用目的" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="来源窗口" Binding="{Binding Session}" Width="110"/><DataGridTextColumn Header="资源" Binding="{Binding Resources}" Width="115"/><DataGridTextColumn Header="状态" Binding="{Binding State}" Width="100"/></DataGrid.Columns></DataGrid></Border>
-    <Border Grid.Row="2" Style="{StaticResource Card}"><DockPanel><Button DockPanel.Dock="Right" Content="查看报告" Command="{Binding ReportCommand}" IsEnabled="{Binding CanOperate}" VerticalAlignment="Top"/><ScrollViewer VerticalScrollBarVisibility="Auto"><TextBlock Text="{Binding Report}" TextWrapping="Wrap"/></ScrollViewer></DockPanel></Border>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <UniformGrid Columns="3" Margin="0,0,-12,14">
+     <Border Style="{StaticResource Card}" Margin="0,0,12,0"><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding RunningCount}" FontSize="26" Foreground="#15734D"/><StackPanel><TextBlock Text="{Binding RunningLabel}" Foreground="#15734D"/><TextBlock Text="正在占用测试资源" Style="{StaticResource Subtle}" FontSize="11" Margin="0,5,0,0"/></StackPanel></DockPanel></Border>
+     <Border Style="{StaticResource Card}" Margin="0,0,12,0"><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding WaitingCount}" FontSize="26" Foreground="#245BB9"/><StackPanel><TextBlock Text="{Binding WaitingLabel}" Foreground="#245BB9"/><TextBlock Text="按同一软件申请顺序" Style="{StaticResource Subtle}" FontSize="11" Margin="0,5,0,0"/></StackPanel></DockPanel></Border>
+     <Border Style="{StaticResource Card}" Margin="0,0,12,0"><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding EndedCount}" FontSize="26" Foreground="#697383"/><StackPanel><TextBlock Text="✓ 已结束" Foreground="#697383"/><TextBlock Text="查看完成、失败或撤回记录" Style="{StaticResource Subtle}" FontSize="11" Margin="0,5,0,0"/></StackPanel></DockPanel></Border>
+    </UniformGrid>
+    <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="310"/></Grid.ColumnDefinitions>
+     <Border Style="{StaticResource Card}"><DockPanel>
+      <StackPanel DockPanel.Dock="Top">
+       <DockPanel Margin="0,0,0,12"><ComboBox DockPanel.Dock="Right" ItemsSource="{Binding QueueLayouts}" SelectedItem="{Binding QueueLayout}" Width="130"/><TextBlock Text="窗口队列" Style="{StaticResource Heading}" VerticalAlignment="Center"/></DockPanel>
+       <TextBlock Text="搜索窗口名称或任务" Style="{StaticResource Subtle}" FontSize="11" Margin="0,0,0,5"/>
+       <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="140"/></Grid.ColumnDefinitions><TextBox Text="{Binding QueueSearch,UpdateSourceTrigger=PropertyChanged}" ToolTip="搜索窗口名称或任务" Margin="0,0,10,0" AutomationProperties.AutomationId="QueueSearch"/><ComboBox Grid.Column="1" ItemsSource="{Binding QueueFilters}" SelectedItem="{Binding QueueFilter}"/></Grid>
+       <DockPanel Margin="0,0,0,10"><TextBlock Text="{Binding ConsoleServiceSummary}" Foreground="{Binding ConsoleServiceColor}" FontSize="12"/><TextBlock Text="{Binding QueueSyncSummary}" Style="{StaticResource Subtle}" HorizontalAlignment="Right" FontSize="11"/></DockPanel>
+       <TextBlock Text="{Binding ConsoleResultSummary}" Style="{StaticResource Subtle}" FontSize="11" Margin="0,0,0,8"/>
+       <Grid Margin="44,0,0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions><TextBlock Text="排位" Style="{StaticResource Subtle}" FontSize="11"/><TextBlock Grid.Column="1" Text="任务 / 提交时间" Style="{StaticResource Subtle}" FontSize="11"/><TextBlock Grid.Column="2" Text="使用软件" Style="{StaticResource Subtle}" FontSize="11"/><TextBlock Grid.Column="3" Text="当前状态" Style="{StaticResource Subtle}" FontSize="11"/></Grid>
+      </StackPanel>
+      <Expander DockPanel.Dock="Bottom" Header="提交检查与队列管理" Margin="0,10,0,0"><StackPanel IsEnabled="{Binding CanOperate}" Margin="0,10,0,0"><ComboBox ItemsSource="{Binding Suites}" SelectedItem="{Binding SelectedSuite}" DisplayMemberPath="Name" AutomationProperties.AutomationId="SuiteSelector"/><WrapPanel Margin="0,8,0,0"><Button Content="提交所选检查" Command="{Binding SubmitCommand}" Style="{StaticResource Primary}" AutomationProperties.AutomationId="SubmitMock"/><Button Content="{Binding PauseLabel}" Command="{Binding PauseCommand}"/></WrapPanel></StackPanel></Expander>
+      <TreeView x:Name="QueueJobsTree" ItemsSource="{Binding DisplayGroups}" Style="{StaticResource WindowQueueTree}" SelectedItemChanged="QueueSelectionChanged" AutomationProperties.AutomationId="QueueJobs"/>
+     </DockPanel></Border>
+     <Border Grid.Column="2" Style="{StaticResource Card}"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+      <TextBlock Text="所选提交" Style="{StaticResource Heading}"/>
+      <Border Background="{Binding SelectedBackground}" CornerRadius="5" Padding="8,5" HorizontalAlignment="Left"><TextBlock Text="{Binding SelectedState}" Foreground="{Binding SelectedColor}" FontWeight="SemiBold" AutomationProperties.AutomationId="SelectedQueueState"/></Border>
+      <TextBlock Text="{Binding SelectedWindow}" FontSize="20" FontWeight="SemiBold" Margin="0,16,0,5" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding SelectedPurpose}" MaxHeight="70" TextTrimming="CharacterEllipsis" Style="{StaticResource Subtle}" Margin="0,0,0,16"/>
+      <Border Background="{Binding SelectedBackground}" CornerRadius="7" Padding="12"><StackPanel><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding SelectedPosition}" Foreground="{Binding SelectedColor}" FontWeight="SemiBold"/><TextBlock Text="{Binding SelectedResource}" FontWeight="SemiBold"/></DockPanel><TextBlock Text="{Binding SelectedStatusDescription}" MaxHeight="140" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"/></StackPanel></Border>
+      <Grid Margin="0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="32"/><RowDefinition Height="32"/><RowDefinition Height="32"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <TextBlock Text="提交时间" Style="{StaticResource Subtle}"/><TextBlock Grid.Column="1" Text="{Binding SelectedCreated}" HorizontalAlignment="Right"/>
+       <TextBlock Grid.Row="1" Text="开始时间" Style="{StaticResource Subtle}"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedStarted}" HorizontalAlignment="Right"/>
+       <TextBlock Grid.Row="2" Text="结束时间" Style="{StaticResource Subtle}"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedEnded}" HorizontalAlignment="Right"/>
+       <TextBlock Grid.Row="3" Text="清理状态" Style="{StaticResource Subtle}"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedCleanup}" TextWrapping="Wrap" HorizontalAlignment="Right"/>
+      </Grid>
+      <Button Content="优先执行" Command="{Binding ManualDispatchCommand}" IsEnabled="{Binding CanManualDispatch}" Background="#245BB9" Foreground="White" BorderBrush="#245BB9" Margin="0,8,0,8" AutomationProperties.AutomationId="ManualDispatch"/>
+      <TextBlock Text="{Binding ManualDispatchHint}" Style="{StaticResource Subtle}" FontSize="11" Margin="0,0,0,8"/>
+      <TextBlock Text="手动结束前，请先停止本次测试并完成自建资源清理。" Style="{StaticResource Subtle}" FontSize="12" Margin="0,10"/>
+      <Button Content="{Binding ManualReleaseLabel}" Command="{Binding ManualReleaseCommand}" IsEnabled="{Binding CanManualRelease}" Foreground="#A5283B" BorderBrush="#E2B4BC" Background="#FFF8F9" Margin="0,0,0,8" AutomationProperties.AutomationId="ManualRelease"/>
+      <Button Content="安全取消固定检查" Command="{Binding CancelCommand}" IsEnabled="{Binding CanCancelSelected}" Margin="0,0,0,8"/>
+      <Expander Header="查看报告与任务编号" Margin="0,12,0,0"><StackPanel><TextBlock Text="{Binding SelectedJob.Id}" FontSize="11" Margin="0,8" TextWrapping="Wrap"/><Button Content="读取详细报告" Command="{Binding ReportCommand}" IsEnabled="{Binding CanOperate}"/><TextBlock Text="{Binding Report}" TextWrapping="Wrap" FontSize="12" Margin="0,10"/></StackPanel></Expander>
+     </StackPanel></ScrollViewer></Border>
+    </Grid>
    </Grid>
    <!-- 连接 -->
    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Visibility="{Binding PageIndex, Converter={StaticResource Page}, ConverterParameter=2}"><StackPanel>

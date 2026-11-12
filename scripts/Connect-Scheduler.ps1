@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet('Inspect','Connect','Disconnect','Recover','Upgrade','Split','InspectModules','DisconnectModules')][string]$Action='Inspect',
     [ValidateSet('all','queue','models')][string]$Module='all',

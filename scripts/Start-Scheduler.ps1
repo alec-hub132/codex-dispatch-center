@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([ValidateSet('Debug','Release')][string]$Configuration='Debug', [string]$DataRoot=(Join-Path $env:LOCALAPPDATA 'CodexDispatch'))
 $ErrorActionPreference='Stop'
 $repo=Split-Path $PSScriptRoot -Parent

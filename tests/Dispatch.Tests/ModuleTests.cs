@@ -3,7 +3,7 @@ using Xunit;
 
 public sealed class ModuleTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "module-tests"), Guid.NewGuid().ToString("N"));
+    private readonly string root = Path.Combine(Path.Combine(Path.GetTempPath(), "module-tests"), Guid.NewGuid().ToString("N"));
     public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
     private Scheduler Open() => new(new JobStore(root));
 

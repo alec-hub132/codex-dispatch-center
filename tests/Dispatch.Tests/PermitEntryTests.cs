@@ -4,7 +4,7 @@ using Xunit;
 namespace Dispatch.Tests;
 public sealed class PermitEntryTests
 {
-    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "CodexDispatch.Tests", "permit-entry-tests"),Guid.NewGuid().ToString("N"));
+    private readonly string root=Path.Combine(Path.Combine(Path.GetTempPath(), "permit-entry-tests"),Guid.NewGuid().ToString("N"));
     [Fact] public async Task Mcp_request_without_acceptance_option_never_grants_to_an_absent_window()
     {
         using var s=new Scheduler(new JobStore(root));var api=new ServiceApi(s);
